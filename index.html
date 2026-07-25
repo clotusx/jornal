@@ -253,6 +253,19 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
 .hoja .pie{margin-top:26px;padding-top:10px;border-top:1px solid #ded7c8;
   font-size:10.5px;color:#8a8177;text-align:center}
 
+/* Maqueta calcada de la hoja «Horas curro»: bloques de día en tres columnas */
+.hoja .bloques{display:flex;flex-wrap:wrap;gap:14px}
+.hoja .excelito{width:230px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;
+  font-size:11.5px;break-inside:avoid;margin-bottom:2px}
+.hoja .excelito td{padding:4px 7px;border:1px solid #fff;text-align:center;height:19px}
+.hoja .excelito .cab td{background:#4A86E8;color:#fff;font-weight:700}
+.hoja .excelito .cab td:first-child{text-align:left}
+.hoja .excelito .obra{background:#C9DAF8;text-align:left;width:120px}
+.hoja .excelito .h{background:#C9DAF8;width:52px;font-variant-numeric:tabular-nums}
+.hoja .excelito .tot{background:#D0E0E3;font-weight:700;width:58px;font-variant-numeric:tabular-nums}
+.hoja .totalsem{width:230px;margin-top:6px}
+.hoja .totalsem .cab td:last-child{font-variant-numeric:tabular-nums}
+
 @media print{
   nav,#splash,.no-print,.barra-inf,#toast,.sheet,#modal{display:none!important}
   html,body{background:#fff!important;margin:0;padding:0}
@@ -336,13 +349,19 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.4.0";
+const APP_VER = "1.5.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.5.0": [
+    "Nuevo botón «Descargar Excel»: genera un .xlsx de verdad con el mismo formato de la hoja de siempre.",
+    "Una pestaña por semana, con los días en su bloque azul y el total en su casilla.",
+    "Hoja aparte con el resumen de horas por obra.",
+    "El informe en PDF sin precios usa también esa misma maqueta."
+  ],
   "1.4.0": [
     "Informes para la empresa: eliges la semana, el mes o el rango de fechas que quieras.",
     "Puedes generar el informe SIN precios ni importes, solo con las horas.",
@@ -1762,12 +1781,251 @@ function pintarExportar(){
       </div>`).join("")}
 
     <div style="display:grid;gap:8px;margin-top:18px">
-      <button class="btn" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver informe e imprimir / PDF</button>
-      <button class="btn sec" data-acc="exp-csv" ${d.dias.length?"":"disabled"}>Descargar CSV para Excel</button>
+      <button class="btn" data-acc="exp-excel" ${d.dias.length?"":"disabled"}>Descargar Excel</button>
+      <div class="tiny muted" style="text-align:center;margin:-3px 0 4px">
+        Mismo formato que tu hoja «Horas curro»: una pestaña por semana</div>
+      <button class="btn sec" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver informe e imprimir / PDF</button>
+      <button class="btn ghost" data-acc="exp-csv" ${d.dias.length?"":"disabled"}>Descargar CSV</button>
       <button class="btn ghost" data-cerrar>Cancelar</button>
     </div>
     ${d.dias.length ? "" : `<p class="tiny" style="color:var(--warn);text-align:center;margin-top:10px">
       No hay ninguna jornada registrada en ese periodo.</p>`}`);
+}
+
+/* ============================================================
+   Generador de archivos .xlsx
+   Un Excel es un ZIP con varios XML dentro, así que hace falta
+   escribir el ZIP a mano (método «store», sin comprimir). Se replica
+   el formato de la hoja «Horas curro»: tres columnas, Arial 10,
+   cabecera de día en azul y casilla de total en verde agua.
+   ============================================================ */
+const XLSX = (() => {
+  const TABLA_CRC = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++){
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(b){
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < b.length; i++) c = TABLA_CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  const utf8 = s => new TextEncoder().encode(s);
+
+  /** ZIP sin compresión: suficiente para XML y evita implementar deflate. */
+  function zip(archivos){
+    const enc = archivos.map(a => ({ nombre: utf8(a.nombre), datos: utf8(a.datos) }));
+    const trozos = [], central = [];
+    let off = 0;
+    const u16 = v => [v & 0xFF, (v >> 8) & 0xFF];
+    const u32 = v => [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >>> 24) & 0xFF];
+
+    for (const f of enc){
+      const crc = crc32(f.datos), n = f.datos.length;
+      const cab = [].concat(
+        u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(n), u32(n), u16(f.nombre.length), u16(0));
+      trozos.push(new Uint8Array(cab), f.nombre, f.datos);
+      central.push([].concat(
+        u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(n), u32(n), u16(f.nombre.length),
+        u16(0), u16(0), u16(0), u16(0), u32(0), u32(off)));
+      off += cab.length + f.nombre.length + n;
+    }
+    const dirIni = off;
+    let dirLen = 0;
+    for (let i = 0; i < central.length; i++){
+      trozos.push(new Uint8Array(central[i]), enc[i].nombre);
+      dirLen += central[i].length + enc[i].nombre.length;
+    }
+    trozos.push(new Uint8Array([].concat(
+      u32(0x06054b50), u16(0), u16(0), u16(enc.length), u16(enc.length),
+      u32(dirLen), u32(dirIni), u16(0))));
+
+    const total = trozos.reduce((s,t) => s + t.length, 0);
+    const salida = new Uint8Array(total);
+    let p = 0;
+    for (const t of trozos){ salida.set(t, p); p += t.length; }
+    return salida;
+  }
+
+  const esc = s => String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&apos;")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,"");
+
+  /* Estilos calcados de «Horas curro» */
+  const ESTILOS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="5">
+<font><sz val="10"/><name val="Arial"/></font>
+<font><sz val="10"/><name val="Arial"/><b/><color rgb="FFFFFFFF"/></font>
+<font><sz val="10"/><name val="Arial"/><b/></font>
+<font><sz val="14"/><name val="Arial"/><b/></font>
+<font><sz val="10"/><name val="Arial"/><color rgb="FF666666"/></font>
+</fonts>
+<fills count="5">
+<fill><patternFill patternType="none"/></fill>
+<fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF4A86E8"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFC9DAF8"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFD0E0E3"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="7">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="2" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+</cellXfs>
+</styleSheet>`;
+
+  const COL = c => { let s = ""; c++; while (c > 0){ const r = (c-1) % 26; s = String.fromCharCode(65+r) + s; c = (c-1-r)/26; } return s; };
+
+  /** hojas: [{ nombre, filas:[[{v,s,num}|null,...],...] }] */
+  function crear(hojas){
+    const partes = [];
+    partes.push({ nombre:"[Content_Types].xml", datos:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+${hojas.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}
+</Types>` });
+
+    partes.push({ nombre:"_rels/.rels", datos:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>` });
+
+    partes.push({ nombre:"xl/workbook.xml", datos:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>${hojas.map((h,i)=>`<sheet name="${esc(h.nombre).slice(0,31)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets>
+</workbook>` });
+
+    partes.push({ nombre:"xl/_rels/workbook.xml.rels", datos:
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${hojas.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}
+<Relationship Id="rId${hojas.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` });
+
+    partes.push({ nombre:"xl/styles.xml", datos: ESTILOS });
+
+    hojas.forEach((h,i) => {
+      const filas = h.filas.map((f,ri) => {
+        const celdas = f.map((c,ci) => {
+          if (c == null) return "";
+          const ref = COL(ci) + (ri+1), st = c.s ? ` s="${c.s}"` : "";
+          if (c.num) return `<c r="${ref}"${st}><v>${c.v}</v></c>`;
+          if (c.v === "" || c.v == null) return `<c r="${ref}"${st}/>`;
+          return `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${esc(c.v)}</t></is></c>`;
+        }).join("");
+        return celdas ? `<row r="${ri+1}">${celdas}</row>` : "";
+      }).join("");
+      partes.push({ nombre:`xl/worksheets/sheet${i+1}.xml`, datos:
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<cols><col min="1" max="1" width="13.13" customWidth="1"/><col min="2" max="2" width="6.75" customWidth="1"/><col min="3" max="3" width="7.5" customWidth="1"/></cols>
+<sheetData>${filas}</sheetData>
+</worksheet>` });
+    });
+
+    return new Blob([zip(partes)],
+      { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+  return { crear };
+})();
+
+/** Construye el libro con el mismo aspecto que «Horas curro»: una hoja por semana. */
+function libroHoras(d){
+  const S_CAB = 1, S_FILA = 2, S_TOT = 3, S_TIT = 4, S_NEG = 5, S_GRIS = 6;
+  const T = (v,s,num) => ({ v, s, num });
+  const hojas = [];
+
+  // Agrupar las jornadas por semana
+  const semanas = new Map();
+  d.dias.forEach(c => {
+    const l = lunes(c.fecha);
+    if (!semanas.has(l)) semanas.set(l, []);
+    semanas.get(l).push(c);
+  });
+
+  for (const [lun, dias] of [...semanas.entries()].sort()){
+    const filas = [];
+    const fin = addDias(lun, 6);
+    filas.push([T(`${fmtCorta(lun)} - ${fmtCorta(fin)}`, S_TIT)]);
+    if (S.perfil.nombre) filas.push([T(S.perfil.nombre, S_NEG)]);
+    filas.push([]);
+
+    dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
+      const dia = DIAS[dow(c.fecha)];
+      filas.push([ T(dia.charAt(0).toUpperCase() + dia.slice(1), S_CAB), T("Horas", S_CAB), T("Total", S_CAB) ]);
+      const partes = c.partes.length ? c.partes : [{ obra: TIPOS[c.tipo].n, horas: c.horasAus || 0 }];
+      partes.forEach((p,i) => {
+        filas.push([
+          T(p.obra, S_FILA),
+          T(p.horas, S_FILA, true),
+          i === 0 ? T(c.horas, S_TOT, true) : T("", S_TOT)
+        ]);
+      });
+      // Espacio en blanco entre días, como en la hoja original
+      filas.push([T("", S_FILA), T("", S_FILA), T("", S_TOT)]);
+      filas.push([]);
+    });
+
+    const totSem = redondea(dias.reduce((s,c) => s + c.horas, 0));
+    filas.push([ T("TOTAL SEMANA", S_CAB), T("", S_CAB), T(totSem, S_CAB, true) ]);
+
+    const nom = `${fmtCorta(lun)}-${fmtCorta(fin)}`.replace(/[\\\/\?\*\[\]:]/g,"");
+    hojas.push({ nombre: nom, filas });
+  }
+
+  // Hoja final con el resumen por obra
+  if (EXP.porObra && d.obras.length){
+    const filas = [];
+    filas.push([T("Horas por obra", S_TIT)]);
+    filas.push([T(etiquetaRango(d.desde, d.hasta), S_GRIS)]);
+    filas.push([]);
+    filas.push([T("Obra", S_CAB), T("Jorn.", S_CAB), T("Horas", S_CAB)]);
+    d.obras.forEach(o => filas.push([T(o.nombre, S_FILA), T(o.dias, S_FILA, true), T(o.horas, S_TOT, true)]));
+    filas.push([T("TOTAL", S_CAB), T(d.diasTrab, S_CAB, true), T(d.horas, S_CAB, true)]);
+    if (EXP.importes){
+      filas.push([]);
+      filas.push([T("Horas extra", S_NEG), T(d.extraPagada, null, true)]);
+      filas.push([T("Importe extra", S_NEG), T(d.importe, null, true)]);
+    }
+    hojas.push({ nombre:"Por obra", filas });
+  }
+  return XLSX.crear(hojas);
+}
+
+function exportarExcel(){
+  const d = datosRango(expDesde, expHasta);
+  if (!d.dias.length){ toast("No hay jornadas en ese periodo"); return; }
+  try{
+    const blob = libroHoras(d);
+    const nom = `horas-${S.perfil.nombre ? S.perfil.nombre.split(" ")[0].toLowerCase()+"-" : ""}${expDesde}_${expHasta}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = nom;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+    cerrarSheet();
+    toast("Excel descargado con el formato de tu hoja");
+  } catch(e){ apuntarError("excel", e); toast("No se ha podido generar el Excel"); }
 }
 
 /* ---------- CSV ---------- */
@@ -1864,7 +2122,34 @@ function verInforme(){
     </tbody></table>`;
   }
 
-  if (EXP.detalle && d.dias.length){
+  // Sin precios se usa la maqueta de la hoja «Horas curro»: bloques por día
+  if (EXP.detalle && d.dias.length && !EXP.importes){
+    const semanas = new Map();
+    d.dias.forEach(c => {
+      const l = lunes(c.fecha);
+      if (!semanas.has(l)) semanas.set(l, []);
+      semanas.get(l).push(c);
+    });
+    for (const [lun, dias] of [...semanas.entries()].sort()){
+      html += `<h3>${fmtCorta(lun)} – ${fmtCorta(addDias(lun,6))}</h3><div class="bloques">`;
+      dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
+        const dia = DIAS[dow(c.fecha)];
+        const partes = c.partes.length ? c.partes : [{ obra:TIPOS[c.tipo].n, horas:c.horasAus||0 }];
+        html += `<table class="excelito"><tbody>
+          <tr class="cab"><td>${dia.charAt(0).toUpperCase()+dia.slice(1)}</td><td>Horas</td><td>Total</td></tr>
+          ${partes.map((p,i) => `<tr>
+            <td class="obra">${esc(p.obra)}</td>
+            <td class="h">${num(p.horas)}</td>
+            ${i===0 ? `<td class="tot" rowspan="${partes.length}">${num(c.horas)}</td>` : ""}
+          </tr>`).join("")}
+        </tbody></table>`;
+      });
+      const tot = redondea(dias.reduce((s,c)=>s+c.horas,0));
+      html += `</div><table class="excelito totalsem"><tbody><tr class="cab">
+        <td>Total semana</td><td></td><td>${num(tot)}</td></tr></tbody></table>`;
+    }
+  }
+  else if (EXP.detalle && d.dias.length){
     html += `<h3>Detalle por jornada</h3>
     <table class="datos"><thead><tr>${th("Fecha")}${th("Día")}${th("Obra")}${th("Horas",1)}${th("Total",1)}${th("Extra",1)}${EXP.importes?th("Importe",1):""}</tr></thead><tbody>
       ${d.dias.map(c => {
@@ -2409,6 +2694,7 @@ document.addEventListener("click", async ev => {
       case "exportar-semana": return abrirExportar(vSemana, addDias(vSemana,6));
       case "exportar-mes":    return abrirExportar(`${vMes}-01`, finDeMes(vMes));
       case "exp-csv":         return exportarCSV();
+      case "exp-excel":       return exportarExcel();
       case "exp-pdf":         return verInforme();
       case "cerrar-informe":  return cerrarInforme();
       case "backup": return descargarBackup(false);
