@@ -297,12 +297,20 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.2.0";
+const APP_VER = "1.3.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
+const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.3.0": [
+    "Código QR para compartir la app: el compañero apunta con la cámara y listo.",
+    "Guardar copia es ahora un solo toque: se abre directamente «Guardar en Archivos».",
+    "La primera vez creas la carpeta «Copias de seguridad Jornal»; después el móvil ya se abre solo en ella.",
+    "En ordenador puedes elegir la carpeta una vez y Jornal escribe las copias solo, sin preguntar nada.",
+    "Los archivos se nombran por fecha, así que quedan siempre ordenados."
+  ],
   "1.2.0": [
     "Botón de actualización: las mejoras llegan con un solo toque y sin perder ni un dato.",
     "Antes de cada actualización se guarda automáticamente una copia en tu móvil.",
@@ -347,6 +355,216 @@ const diasEntre = (a,b) => Math.round((parse(b)-parse(a))/86400000);
 const redondea = n => Math.round(n*100)/100;
 const eur = n => (isFinite(n)?n:0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
 const num = n => (redondea(isFinite(n)?n:0)).toLocaleString("es-ES",{maximumFractionDigits:2});
+
+/* ============================================================
+   Generador de códigos QR
+   Modo byte, corrección nivel L, versiones 1 a 5 (hasta 106
+   caracteres): de sobra para una URL. Escrito a mano porque la
+   app no debe cargar ninguna librería externa que pueda caerse.
+   ============================================================ */
+const QR = (() => {
+  // Aritmética en el cuerpo de Galois GF(256), necesaria para Reed-Solomon
+  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  { let x = 1;
+    for (let i = 0; i < 255; i++){ EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11D; }
+    for (let i = 255; i < 512; i++) EXP[i] = EXP[i-255]; }
+  const mul = (a,b) => (a === 0 || b === 0) ? 0 : EXP[LOG[a] + LOG[b]];
+
+  // Por versión: [codewords de datos, codewords de corrección]. Nivel L, un solo bloque.
+  const CAP  = { 1:[19,7], 2:[34,10], 3:[55,15], 4:[80,20], 5:[108,26] };
+  const ALIN = { 1:[], 2:[6,18], 3:[6,22], 4:[6,26], 5:[6,30] };
+
+  function rsGen(n){
+    let g = [1];
+    for (let i = 0; i < n; i++){
+      const ng = new Array(g.length + 1).fill(0);
+      for (let j = 0; j < g.length; j++){ ng[j] ^= g[j]; ng[j+1] ^= mul(g[j], EXP[i]); }
+      g = ng;
+    }
+    return g;
+  }
+  function rsEc(datos, n){
+    const g = rsGen(n), r = new Uint8Array(datos.length + n);
+    r.set(datos);
+    for (let i = 0; i < datos.length; i++){
+      const c = r[i]; if (!c) continue;
+      for (let j = 0; j < g.length; j++) r[i+j] ^= mul(g[j], c);
+    }
+    return r.slice(datos.length);
+  }
+
+  function codificar(texto){
+    const bytes = new TextEncoder().encode(texto);
+    let ver = 0;
+    for (const v of [1,2,3,4,5]) if (bytes.length <= CAP[v][0] - 2){ ver = v; break; }
+    if (!ver) return null;
+    const [nDat, nEc] = CAP[ver];
+
+    const bits = [];
+    const push = (val, len) => { for (let i = len-1; i >= 0; i--) bits.push((val >> i) & 1); };
+    push(4, 4);                       // indicador de modo byte
+    push(bytes.length, 8);            // contador de caracteres (versiones 1-9)
+    bytes.forEach(b => push(b, 8));
+    for (let i = 0; i < 4 && bits.length < nDat*8; i++) bits.push(0);   // terminador
+    while (bits.length % 8) bits.push(0);
+
+    const datos = new Uint8Array(nDat);
+    for (let i = 0; i < bits.length; i += 8){
+      let b = 0; for (let j = 0; j < 8; j++) b = (b << 1) | bits[i+j];
+      datos[i >> 3] = b;
+    }
+    let p = bits.length >> 3, alt = 0;
+    while (p < nDat) datos[p++] = (alt++ % 2) ? 0x11 : 0xEC;   // relleno alterno
+
+    const ec = rsEc(datos, nEc);
+    const cw = new Uint8Array(nDat + nEc);
+    cw.set(datos); cw.set(ec, nDat);
+    return { ver, cw };
+  }
+
+  const MASCARAS = [
+    (r,c) => (r+c) % 2 === 0,
+    (r,c) => r % 2 === 0,
+    (r,c) => c % 3 === 0,
+    (r,c) => (r+c) % 3 === 0,
+    (r,c) => (Math.floor(r/2) + Math.floor(c/3)) % 2 === 0,
+    (r,c) => (r*c) % 2 + (r*c) % 3 === 0,
+    (r,c) => ((r*c) % 2 + (r*c) % 3) % 2 === 0,
+    (r,c) => ((r+c) % 2 + (r*c) % 3) % 2 === 0
+  ];
+
+  function penalizacion(m){
+    const n = m.length; let pen = 0;
+    // Regla 1: rachas de 5 o más módulos del mismo color
+    for (let i = 0; i < n; i++){
+      for (const fila of [true,false]){
+        let run = 1, prev = fila ? m[i][0] : m[0][i];
+        for (let j = 1; j < n; j++){
+          const v = fila ? m[i][j] : m[j][i];
+          if (v === prev) run++;
+          else { if (run >= 5) pen += 3 + (run-5); run = 1; prev = v; }
+        }
+        if (run >= 5) pen += 3 + (run-5);
+      }
+    }
+    // Regla 2: bloques 2x2 del mismo color
+    for (let r = 0; r < n-1; r++) for (let c = 0; c < n-1; c++)
+      if (m[r][c] === m[r][c+1] && m[r][c] === m[r+1][c] && m[r][c] === m[r+1][c+1]) pen += 3;
+    // Regla 3: patrones que se confunden con los localizadores
+    const A = [1,0,1,1,1,0,1,0,0,0,0], B = [0,0,0,0,1,0,1,1,1,0,1];
+    for (let i = 0; i < n; i++) for (let j = 0; j <= n-11; j++){
+      let a = true, b = true, a2 = true, b2 = true;
+      for (let k = 0; k < 11; k++){
+        if (m[i][j+k] !== A[k]) a = false;
+        if (m[i][j+k] !== B[k]) b = false;
+        if (m[j+k][i] !== A[k]) a2 = false;
+        if (m[j+k][i] !== B[k]) b2 = false;
+      }
+      if (a) pen += 40; if (b) pen += 40; if (a2) pen += 40; if (b2) pen += 40;
+    }
+    // Regla 4: desequilibrio entre claros y oscuros
+    let osc = 0;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) osc += m[r][c];
+    pen += Math.floor(Math.abs(osc*100/(n*n) - 50) / 5) * 10;
+    return pen;
+  }
+
+  function bitsFormato(mask){
+    const d = (0x01 << 3) | mask;          // nivel L = 01
+    let v = d << 10;
+    for (let i = 14; i >= 10; i--) if ((v >> i) & 1) v ^= 0x537 << (i-10);
+    return ((d << 10) | v) ^ 0x5412;
+  }
+
+  /** Devuelve una matriz de 0 y 1 lista para dibujar, o null si no cabe. */
+  function generar(texto){
+    const enc = codificar(texto);
+    if (!enc) return null;
+    const { ver, cw } = enc;
+    const n = 17 + 4*ver;
+    const m = Array.from({length:n}, () => new Int8Array(n).fill(-1));
+    const put = (r,c,v) => { if (r >= 0 && r < n && c >= 0 && c < n) m[r][c] = v; };
+
+    // Localizadores y separadores
+    for (const [r0,c0] of [[0,0],[0,n-7],[n-7,0]])
+      for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++){
+        const dentro = r >= 0 && r <= 6 && c >= 0 && c <= 6;
+        const anillo = dentro && (r === 0 || r === 6 || c === 0 || c === 6);
+        const centro = dentro && r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        put(r0+r, c0+c, (anillo || centro) ? 1 : 0);
+      }
+    // Temporizadores
+    for (let i = 8; i < n-8; i++){ m[6][i] = (i % 2 === 0) ? 1 : 0; m[i][6] = (i % 2 === 0) ? 1 : 0; }
+    // Alineación
+    for (const r of ALIN[ver]) for (const c of ALIN[ver]){
+      if ((r <= 8 && c <= 8) || (r <= 8 && c >= n-9) || (r >= n-9 && c <= 8)) continue;
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
+        put(r+dr, c+dc, Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 0 : 1);
+    }
+    // Reservar la zona de información de formato
+    const fmtPos = [];
+    for (let i = 0; i <= 8; i++){ fmtPos.push([8,i]); fmtPos.push([i,8]); }
+    for (let i = 0; i < 8; i++){ fmtPos.push([8,n-1-i]); fmtPos.push([n-1-i,8]); }
+    fmtPos.forEach(([r,c]) => { if (m[r][c] === -1) m[r][c] = 2; });
+
+    // Qué celdas llevan datos (y por tanto se enmascaran)
+    const libre = m.map(f => Array.from(f, v => v === -1));
+
+    // Colocación en zigzag desde abajo a la derecha
+    let bi = 0;
+    const sig = () => {
+      const i = bi >> 3;
+      const b = (i < cw.length) ? ((cw[i] >> (7 - (bi & 7))) & 1) : 0;
+      bi++; return b;
+    };
+    let arriba = true;
+    for (let c = n-1; c > 0; c -= 2){
+      if (c === 6) c--;                       // la columna 6 es temporizador
+      for (let k = 0; k < n; k++){
+        const r = arriba ? (n-1-k) : k;
+        for (let dc = 0; dc < 2; dc++)
+          if (libre[r][c-dc]) m[r][c-dc] = sig();
+      }
+      arriba = !arriba;
+    }
+
+    // Probar las 8 máscaras y quedarse con la que menos penaliza
+    let mejor = null, mejorPen = Infinity;
+    for (let k = 0; k < 8; k++){
+      const t = m.map((f,r) => Array.from(f, (v,c) =>
+        libre[r][c] ? (v ^ (MASCARAS[k](r,c) ? 1 : 0)) : (v === 2 ? 0 : v)));
+      const fmt = bitsFormato(k);
+      for (let i = 0; i < 15; i++){
+        const b = (fmt >> i) & 1;
+        if (i < 6)       t[8][i] = b;
+        else if (i < 8)  t[8][i+1] = b;
+        else if (i === 8) t[7][8] = b;
+        else             t[14-i][8] = b;
+        if (i < 8) t[n-1-i][8] = b;
+        else       t[8][n-15+i] = b;
+      }
+      t[n-8][8] = 1;                          // módulo oscuro fijo
+      const p = penalizacion(t);
+      if (p < mejorPen){ mejorPen = p; mejor = t; }
+    }
+    return mejor;
+  }
+
+  /** SVG autocontenido. Fondo blanco siempre: un QR necesita contraste real. */
+  function svg(texto, lado){
+    const m = generar(texto);
+    if (!m) return null;
+    const n = m.length, q = 4, tot = n + q*2;
+    let d = "";
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+      if (m[y][x]) d += `M${x+q} ${y+q}h1v1h-1z`;
+    return `<svg viewBox="0 0 ${tot} ${tot}" width="${lado}" height="${lado}"
+      shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg" role="img"
+      aria-label="Código QR de la app"><rect width="${tot}" height="${tot}" fill="#fff"/>
+      <path d="${d}" fill="#000"/></svg>`;
+  }
+  return { generar, svg };
+})();
 
 /* ============================================================
    Registro de errores  →  informe por correo
@@ -877,9 +1095,13 @@ function mostrarAvisos(){
   }
   const ult = S.ultimoBackup || S.creado;
   if (ult && diasEntre(ult, hoyISO()) >= 7 && Object.keys(S.dias).length > 0){
+    const primera = !S.ultimoBackup;
     h += `<div class="aviso info"><div style="flex:1"><b>Copia semanal pendiente</b>
-      Hace ${diasEntre(ult, hoyISO())} días de la última. Guárdala en Archivos o Drive.</div>
-      <button class="btn" style="width:auto;padding:9px 14px;font-size:13px" data-acc="backup">Guardar</button></div>`;
+      ${primera
+        ? `Todavía no has guardado ninguna copia fuera del dispositivo.`
+        : `Hace ${diasEntre(ult, hoyISO())} días de la última.`}</div>
+      <button class="btn" style="width:auto;padding:9px 14px;font-size:13px"
+              data-acc="${primera ? "guia-copias" : "backup"}">${primera ? "Cómo" : "Guardar"}</button></div>`;
   }
   if (ERRORES.length){
     h += `<div class="aviso err"><div style="flex:1"><b>Se ha detectado un fallo</b>
@@ -1155,19 +1377,35 @@ function vistaAjustes(){
     <div class="stat"><span>Última copia descargada</span><b class="tiny">${S.ultimoBackup?fmtCorta(S.ultimoBackup):"nunca"}</b></div>
     <div class="stat"><span>Copias automáticas internas</span><b class="tiny" id="nSnap">…</b></div>
     <div class="stat"><span>Almacenamiento protegido</span><b class="tiny" id="persistEstado">…</b></div>
+    ${dirCopias ? `<div class="stat"><span>Carpeta de copias</span>
+      <b class="tiny" style="color:var(--ok)">automática ✓</b></div>` : ""}
     <div style="display:grid;gap:8px;margin-top:12px">
-      <button class="btn" data-acc="backup">Descargar copia de seguridad</button>
+      <button class="btn" data-acc="backup">${dirCopias ? "Guardar copia ahora" : "Guardar copia"}</button>
       <button class="btn sec" data-acc="restaurar">Restaurar desde archivo</button>
       <button class="btn ghost" data-acc="snapshots">Copias automáticas del móvil</button>
+      ${soportaCarpeta()
+        ? (dirCopias
+            ? `<button class="link" data-acc="olvidar-carpeta">Dejar de guardar en esa carpeta</button>`
+            : `<button class="btn ghost" data-acc="elegir-carpeta">Elegir carpeta y que se guarden solas</button>`)
+        : `<button class="btn ghost" data-acc="guia-copias">¿Cómo las guardo en una carpeta?</button>`}
       <input type="file" id="fileIn" accept=".json,application/json" class="hide">
     </div>
-    <p class="tiny muted" style="margin:12px 0 0">Jornal guarda una copia automática dentro del móvil cada 7 días.
-      Aun así, descarga el archivo y súbelo a iCloud o Drive: es lo único que sobrevive si pierdes el teléfono.</p>
+    <p class="tiny muted" style="margin:12px 0 0">${dirCopias
+      ? `Las copias se escriben solas en la carpeta <b>${CARPETA_COPIAS}</b>.`
+      : `Jornal guarda copias automáticas dentro del dispositivo cada 7 días, pero esas se pierden
+         con el móvil. Guarda también el archivo en <b>${CARPETA_COPIAS}</b> dentro de iCloud o Drive.`}</p>
   </div>
 
   <div class="card">
     <h2>Obras</h2>
     <button class="btn ghost" data-acc="obras">Gestionar catálogo (${S.obras.length})</button>
+  </div>
+
+  <div class="card">
+    <h2>Compartir con un compañero</h2>
+    <p class="small muted" style="margin:0 0 12px">Enséñale el código y que lo escanee con la cámara.
+      Cada persona tendrá sus propias tarifas y sus propios datos.</p>
+    <button class="btn" data-acc="qr">Mostrar código QR</button>
   </div>
 
   <div class="card">
@@ -1390,11 +1628,147 @@ function exportarCSV(){
   const csv = "﻿" + F.map(f => f.map(c => `"${String(c??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
   if (descarga(`jornal-${vMes}.csv`, csv, "text/csv;charset=utf-8")) toast("CSV descargado — se abre con Excel");
 }
-async function descargarBackup(){
-  const nombre = `jornal-${(S.perfil.nombre||"copia").split(" ")[0].toLowerCase()}-${hoyISO()}.json`;
-  if (!descarga(nombre, JSON.stringify(S), "application/json")) return;
+/* ============================================================
+   Copias de seguridad en archivo
+   Tres vías, se usa la mejor que permita el dispositivo:
+   1. Carpeta elegida (ordenador): escritura automática, sin preguntar nada.
+   2. Hoja de compartir (móvil): un toque y «Guardar en Archivos». iOS y Android
+      recuerdan la última carpeta usada, así que a partir de la 2ª vez ya se abre
+      directamente en «Copias de seguridad Jornal».
+   3. Descarga normal, como respaldo.
+   Ningún sistema operativo móvil permite que una web escriba sola en el
+   almacenamiento del usuario, así que la vía 1 es exclusiva de escritorio.
+   ============================================================ */
+const KEY_DIR = "carpeta-copias";
+let dirCopias = null;
+
+const soportaCarpeta = () => typeof window.showDirectoryPicker === "function";
+function nombreCopia(){
+  const quien = (S.perfil.nombre || "").trim().split(" ")[0]
+    .toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]/g,"");
+  return `jornal-${hoyISO()}${quien ? "-" + quien : ""}.json`;
+}
+async function cargarCarpeta(){
+  try { dirCopias = (await idbGet(KEY_DIR)) || null; }
+  catch(e){ dirCopias = null; }
+}
+async function permisoCarpeta(pedir){
+  if (!dirCopias || !dirCopias.queryPermission) return false;
+  try{
+    const opt = { mode:"readwrite" };
+    if (await dirCopias.queryPermission(opt) === "granted") return true;
+    if (pedir && await dirCopias.requestPermission(opt) === "granted") return true;
+  } catch(e){ apuntarError("permiso-carpeta", e); }
+  return false;
+}
+async function elegirCarpeta(){
+  if (!soportaCarpeta()){ toast("Este navegador no permite elegir carpeta"); return; }
+  try{
+    const padre = await window.showDirectoryPicker({ mode:"readwrite", startIn:"documents", id:"jornal-copias" });
+    dirCopias = await padre.getDirectoryHandle(CARPETA_COPIAS, { create:true });
+    await idbPut(KEY_DIR, dirCopias);
+    await escribirEnCarpeta();
+    render();
+    toast(`Carpeta lista. Las copias se guardarán solas en «${CARPETA_COPIAS}»`);
+  } catch(e){
+    if (e && e.name === "AbortError") return;      // el usuario ha cancelado
+    apuntarError("elegir-carpeta", e);
+    toast("No se ha podido preparar la carpeta");
+  }
+}
+async function olvidarCarpeta(){
+  const ok = await confirmar("¿Dejar de usar esa carpeta?",
+    "Jornal dejará de guardar las copias solo. Los archivos ya guardados no se tocan.",
+    "Sí, olvidarla", true);
+  if (!ok) return;
+  dirCopias = null;
+  try { await idbPut(KEY_DIR, null); } catch(e){}
+  render(); toast("Carpeta olvidada");
+}
+async function escribirEnCarpeta(){
+  if (!dirCopias) return false;
+  if (!(await permisoCarpeta(true))) return false;
+  try{
+    const fh = await dirCopias.getFileHandle(nombreCopia(), { create:true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(S));
+    await w.close();
+    S.ultimoBackup = hoyISO();
+    await guardar();
+    return true;
+  } catch(e){ apuntarError("escribir-carpeta", e); return false; }
+}
+
+/** Guardar copia. `auto`=true cuando la lanza la propia app (sin toque del usuario). */
+async function descargarBackup(auto){
+  const nombre = nombreCopia(), texto = JSON.stringify(S);
+
+  // 1) Carpeta ya autorizada: se escribe sola, sin ninguna pregunta
+  if (dirCopias){
+    if (await escribirEnCarpeta()){
+      render();
+      if (!auto) toast(`Guardada en «${CARPETA_COPIAS}»`);
+      return true;
+    }
+  }
+  // Las llamadas automáticas no pueden abrir la hoja de compartir: los
+  // navegadores solo lo permiten como respuesta a un toque.
+  if (auto) return false;
+
+  // 2) Móvil: hoja de compartir → «Guardar en Archivos»
+  try{
+    const file = new File([texto], nombre, { type:"application/json" });
+    if (navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title:"Copia de seguridad de Jornal" });
+      S.ultimoBackup = hoyISO(); await guardar(); render();
+      toast("Copia guardada");
+      return true;
+    }
+  } catch(e){
+    if (e && e.name === "AbortError") return false;   // el usuario ha cancelado
+    apuntarError("compartir-copia", e);
+  }
+  // 3) Descarga normal
+  if (!descarga(nombre, texto, "application/json")) return false;
   S.ultimoBackup = hoyISO(); await guardar(); render();
-  toast("Guárdala en Archivos → iCloud Drive o Google Drive");
+  toast(soportaCarpeta() ? "Copia descargada" : "Guárdala en Archivos o Drive");
+  return true;
+}
+
+/** Explicación de la primera vez, para que la carpeta se cree bien */
+function guiaCopias(){
+  const p = plataforma();
+  let pasos;
+  if (soportaCarpeta()){
+    pasos = `${pasoHTML(1, `Pulsa <b>Elegir carpeta</b> y selecciona dónde quieres guardarlas (por ejemplo, Documentos).`)}
+      ${pasoHTML(2, `Jornal creará dentro la carpeta <b>${CARPETA_COPIAS}</b>.`)}
+      ${pasoHTML(3, `A partir de ahí las copias se guardan <b>solas</b>, sin preguntarte nada.`)}
+      <button class="btn" style="margin-top:6px" data-acc="elegir-carpeta">Elegir carpeta</button>`;
+  } else if (p === "ios"){
+    pasos = `${pasoHTML(1, `Pulsa <b>Guardar copia</b>. Se abre el menú de compartir del iPhone.`)}
+      ${pasoHTML(2, `Elige <b>Guardar en Archivos</b>.`)}
+      ${pasoHTML(3, `Solo la primera vez: pulsa <b>Nueva carpeta</b> arriba, llámala
+        <b>${CARPETA_COPIAS}</b> y entra en ella. Mejor dentro de <b>iCloud Drive</b>, así se
+        guarda también en la nube y sobrevive aunque pierdas el móvil.`)}
+      ${pasoHTML(4, `Pulsa <b>Guardar</b>. Las siguientes veces el iPhone ya se abrirá
+        directamente en esa carpeta: solo tendrás que pulsar Guardar.`)}`;
+  } else {
+    pasos = `${pasoHTML(1, `Pulsa <b>Guardar copia</b>. Se abre el menú de compartir.`)}
+      ${pasoHTML(2, `Elige <b>Guardar en Drive</b> o <b>Archivos</b>.`)}
+      ${pasoHTML(3, `Solo la primera vez: crea la carpeta <b>${CARPETA_COPIAS}</b> y entra en ella.
+        Después el móvil ya se abrirá ahí solo.`)}`;
+  }
+  abrirSheet(`<h2>Copias de seguridad</h2>
+    <p class="small muted" style="margin:0 0 16px">Jornal ya guarda copias automáticas dentro del
+      móvil, pero esas se pierden si pierdes el teléfono. Esta copia es un archivo de verdad
+      que puedes llevarte a donde quieras.</p>
+    ${pasos}
+    <div class="aviso info" style="margin-top:8px"><div>El archivo lleva la fecha en el nombre,
+      así que en la carpeta quedan siempre ordenados del más antiguo al más nuevo.</div></div>
+    <div style="display:grid;gap:8px;margin-top:14px">
+      ${soportaCarpeta() ? "" : `<button class="btn" data-acc="backup">Guardar copia ahora</button>`}
+      <button class="btn sec" data-cerrar>Entendido</button>
+    </div>`);
 }
 function pedirRestaurar(){ $("#fileIn").click(); }
 function restaurar(input){
@@ -1683,6 +2057,30 @@ async function mostrarInstalar(){
     </div>`);
 }
 
+/** Pantalla con el QR: el compañero lo escanea con la cámara y ya está. */
+function mostrarQR(){
+  const url = location.href.split("#")[0].split("?")[0];
+  const svg = QR.svg(url, 232);
+  abrirSheet(`<h2>Compartir Jornal</h2>
+    <p class="small muted" style="margin:0 0 16px">Que apunte con la cámara del móvil.
+      No hace falta escribir nada ni pasar ningún enlace.</p>
+    ${svg
+      ? `<div style="display:flex;justify-content:center;margin-bottom:14px">
+           <div style="background:#fff;padding:14px;border-radius:14px;
+                       box-shadow:0 2px 14px rgba(42,40,35,.14);line-height:0">${svg}</div>
+         </div>
+         <p class="tiny muted mono" style="text-align:center;word-break:break-all;margin:0 0 16px">${esc(url)}</p>`
+      : `<div class="aviso err"><div>No se ha podido generar el código.
+           Comparte el enlace directamente:<br><b>${esc(url)}</b></div></div>`}
+    <div class="aviso info"><div><b>Cada uno con sus datos</b>
+      Quien la abra rellenará su propia nómina y sus tarifas. Sus horas se quedan
+      en su móvil: tú no ves las suyas y él no ve las tuyas.</div></div>
+    <div style="display:grid;gap:8px;margin-top:14px">
+      <button class="btn" data-acc="compartir">Enviar el enlace por mensaje</button>
+      <button class="btn sec" data-cerrar>Cerrar</button>
+    </div>`);
+}
+
 async function compartir(){
   const datos = { title:"Jornal — registro de horas",
     text:"Apunta tus horas y calcula tus extras. Gratis, sin cuentas y funciona sin cobertura.",
@@ -1738,7 +2136,10 @@ document.addEventListener("click", async ev => {
       }
       case "csv": return exportarCSV();
       case "print": return window.print();
-      case "backup": return descargarBackup();
+      case "backup": return descargarBackup(false);
+      case "elegir-carpeta": return elegirCarpeta();
+      case "olvidar-carpeta": return olvidarCarpeta();
+      case "guia-copias": return guiaCopias();
       case "restaurar": return pedirRestaurar();
       case "snapshots": return verSnapshots();
       case "obras": return gestionarObras();
@@ -1746,6 +2147,7 @@ document.addEventListener("click", async ev => {
       case "copiar-informe": return copiarInforme();
       case "limpiar-errores": return limpiarErrores();
       case "compartir": return compartir();
+      case "qr": return mostrarQR();
       case "actualizar": return aplicarActualizacion();
       case "buscar-update": return buscarActualizacionManual();
       case "novedades": return mostrarNovedades("0");
@@ -1821,6 +2223,7 @@ async function iniciar(){
 
   let guardado = null;
   try { guardado = await leerDisco(); } catch(e){ apuntarError("arranque-leer", e); }
+  await cargarCarpeta();
 
   if (guardado && guardado.dias){
     S = {...estadoNuevo(), ...guardado,
@@ -1839,6 +2242,10 @@ async function iniciar(){
     $("#app").classList.remove("hide"); $("#nav").classList.remove("hide");
     render();
     snapshotSemanal();
+    // Si hay carpeta autorizada y toca copia semanal, se escribe sola.
+    const ultB = S.ultimoBackup || S.creado;
+    if (dirCopias && ultB && diasEntre(ultB, hoyISO()) >= 7 && Object.keys(S.dias).length)
+      descargarBackup(true).then(ok => { if (ok) toast(`Copia semanal guardada en «${CARPETA_COPIAS}»`); });
     // ¿Venimos de una actualización? Enseñar qué ha cambiado.
     const vista = S.verVista || "0";
     if (cmpVer(APP_VER, vista) > 0){
