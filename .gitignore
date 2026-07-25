@@ -8,3 +8,9 @@ jornal-datos-*
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Archivos de prueba
+_prueba.*
+*.pdf
+*.xlsx
+*.csv

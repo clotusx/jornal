@@ -349,13 +349,18 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.5.0";
+const APP_VER = "1.6.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.6.0": [
+    "Botón «Compartir PDF»: el informe sale como archivo y se manda por WhatsApp, correo o donde quieras.",
+    "El PDF lo genera la propia app, ya no hace falta pasar por el diálogo de imprimir.",
+    "Mantiene la maqueta de siempre: bloques de día en azul y el total en su casilla."
+  ],
   "1.5.0": [
     "Nuevo botón «Descargar Excel»: genera un .xlsx de verdad con el mismo formato de la hoja de siempre.",
     "Una pestaña por semana, con los días en su bloque azul y el total en su casilla.",
@@ -1781,10 +1786,18 @@ function pintarExportar(){
       </div>`).join("")}
 
     <div style="display:grid;gap:8px;margin-top:18px">
-      <button class="btn" data-acc="exp-excel" ${d.dias.length?"":"disabled"}>Descargar Excel</button>
+      <button class="btn" data-acc="exp-compartir-pdf" ${d.dias.length?"":"disabled"}>
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M12 3 8 7M12 3l4 4"/>
+        <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+        Compartir PDF</button>
+      <div class="tiny muted" style="text-align:center;margin:-3px 0 4px">
+        Se abre el menú del móvil: WhatsApp, correo, Archivos…</div>
+      <button class="btn sec" data-acc="exp-excel" ${d.dias.length?"":"disabled"}>Descargar Excel</button>
       <div class="tiny muted" style="text-align:center;margin:-3px 0 4px">
         Mismo formato que tu hoja «Horas curro»: una pestaña por semana</div>
-      <button class="btn sec" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver informe e imprimir / PDF</button>
+      <button class="btn ghost" data-acc="exp-pdf-bajar" ${d.dias.length?"":"disabled"}>Solo descargar el PDF</button>
+      <button class="btn ghost" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver el informe en pantalla</button>
       <button class="btn ghost" data-acc="exp-csv" ${d.dias.length?"":"disabled"}>Descargar CSV</button>
       <button class="btn ghost" data-cerrar>Cancelar</button>
     </div>
@@ -2081,6 +2094,318 @@ function exportarCSV(){
   const csv = "﻿" + F.map(f => f.map(c => `"${String(c ?? "").replace(/"/g,'""')}"`).join(";")).join("\r\n");
   const nom = `horas-${S.perfil.nombre ? S.perfil.nombre.split(" ")[0].toLowerCase()+"-" : ""}${expDesde}_${expHasta}.csv`;
   if (descarga(nom, csv, "text/csv;charset=utf-8")){ cerrarSheet(); toast("CSV descargado — se abre con Excel"); }
+}
+
+/* ============================================================
+   Generador de PDF
+   Un PDF es texto plano con objetos numerados y una tabla de
+   referencias al final. Se usan las fuentes Helvetica estándar,
+   que no hay que incrustar, y codificación WinAnsi, que cubre
+   todos los acentos y la eñe del castellano.
+   ============================================================ */
+const PDF = (() => {
+  const ANCHO = 595.28, ALTO = 841.89, M = 40;   // A4 vertical
+
+  // Anchuras de Helvetica (por cada 1000 unidades) para calcular centrados
+  const W = {};
+  {
+    const asc = "278 278 355 556 556 889 667 191 333 333 389 584 278 333 278 278 "+
+      "556 556 556 556 556 556 556 556 556 556 278 278 584 584 584 556 1015 "+
+      "667 667 722 722 667 611 778 722 278 500 667 556 833 722 778 667 778 722 667 611 722 667 944 667 667 611 "+
+      "278 278 278 469 556 333 "+
+      "556 556 500 556 556 278 556 556 222 222 500 222 833 556 556 556 556 333 500 278 556 500 722 500 500 500 "+
+      "334 260 334 584";
+    asc.split(" ").forEach((v,i) => W[32+i] = +v);
+  }
+  const anchoTexto = (s, tam) => {
+    let t = 0;
+    for (const ch of s){ const c = ch.codePointAt(0); t += (c < 127 ? (W[c] || 556) : 556); }
+    return t * tam / 1000;
+  };
+
+  /* Unicode → WinAnsi (CP1252). El castellano cabe entero en Latin-1. */
+  const ESPECIAL = { 0x20AC:0x80, 0x201A:0x82, 0x2026:0x85, 0x2018:0x91, 0x2019:0x92,
+                     0x201C:0x93, 0x201D:0x94, 0x2022:0x95, 0x2013:0x96, 0x2014:0x97 };
+  function winAnsi(s){
+    let o = "";
+    for (const ch of String(s)){
+      const c = ch.codePointAt(0);
+      o += String.fromCharCode(c < 256 ? c : (ESPECIAL[c] || 0x3F));
+    }
+    return o;
+  }
+  const escapa = s => winAnsi(s).replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)");
+
+  function nuevo(){
+    const paginas = [];
+    let ops = null;
+    const api = {
+      get y(){ return api._y; },
+      set y(v){ api._y = v; },
+      _y: 0,
+      ANCHO, ALTO, M, anchoUtil: ANCHO - M*2,
+
+      pagina(){ ops = []; paginas.push(ops); api._y = ALTO - M; return api; },
+      /** ¿Cabe algo de `alto` puntos? Si no, salta de página. */
+      sitio(alto){ if (api._y - alto < M){ api.pagina(); return true; } return false; },
+
+      color(hex){
+        const n = parseInt(hex.replace("#",""), 16);
+        ops.push(`${(((n>>16)&255)/255).toFixed(3)} ${(((n>>8)&255)/255).toFixed(3)} ${((n&255)/255).toFixed(3)} rg`);
+        return api;
+      },
+      rect(x, y, w, h, hex){ api.color(hex); ops.push(`${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`); return api; },
+      linea(x1, y1, x2, y2, hex, grosor){
+        const n = parseInt((hex||"#000000").replace("#",""), 16);
+        ops.push(`${(((n>>16)&255)/255).toFixed(3)} ${(((n>>8)&255)/255).toFixed(3)} ${((n&255)/255).toFixed(3)} RG`);
+        ops.push(`${(grosor||0.5)} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`);
+        return api;
+      },
+      /** al: "izq" | "centro" | "der" */
+      texto(s, x, y, tam, opt){
+        s = String(s == null ? "" : s);
+        if (!s) return api;
+        const o = opt || {};
+        const fuente = o.negrita ? "F2" : "F1";
+        let px = x;
+        if (o.al === "centro") px = x - anchoTexto(s, tam)/2;
+        else if (o.al === "der") px = x - anchoTexto(s, tam);
+        api.color(o.color || "#000000");
+        ops.push(`BT /${fuente} ${tam} Tf 1 0 0 1 ${px.toFixed(2)} ${y.toFixed(2)} Tm (${escapa(s)}) Tj ET`);
+        return api;
+      },
+
+      blob(){
+        const objetos = [];
+        const idPag = i => 4 + i*2;           // cada página usa 2 objetos
+        objetos[1] = `<</Type/Catalog/Pages 2 0 R>>`;
+        objetos[2] = `<</Type/Pages/Kids[${paginas.map((_,i)=>`${idPag(i)} 0 R`).join(" ")}]/Count ${paginas.length}>>`;
+        objetos[3] = `<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>`;
+        const idBold = 4 + paginas.length*2;
+        paginas.forEach((p, i) => {
+          const flujo = p.join("\n");
+          objetos[idPag(i)] =
+            `<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${ANCHO} ${ALTO}]` +
+            `/Resources<</Font<</F1 3 0 R/F2 ${idBold} 0 R>>>>/Contents ${idPag(i)+1} 0 R>>`;
+          objetos[idPag(i)+1] = `<</Length ${flujo.length}>>\nstream\n${flujo}\nendstream`;
+        });
+        objetos[idBold] = `<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>`;
+
+        let salida = "%PDF-1.4\n";
+        const pos = [];
+        for (let i = 1; i < objetos.length; i++){
+          if (!objetos[i]) continue;
+          pos[i] = salida.length;
+          salida += `${i} 0 obj\n${objetos[i]}\nendobj\n`;
+        }
+        const inicioXref = salida.length;
+        const n = objetos.length;
+        salida += `xref\n0 ${n}\n0000000000 65535 f \n`;
+        for (let i = 1; i < n; i++)
+          salida += (pos[i] != null)
+            ? `${String(pos[i]).padStart(10,"0")} 00000 n \n`
+            : `0000000000 65535 f \n`;
+        salida += `trailer\n<</Size ${n}/Root 1 0 R>>\nstartxref\n${inicioXref}\n%%EOF`;
+
+        const bytes = new Uint8Array(salida.length);
+        for (let i = 0; i < salida.length; i++) bytes[i] = salida.charCodeAt(i) & 0xFF;
+        return new Blob([bytes], { type:"application/pdf" });
+      }
+    };
+    return api.pagina();
+  }
+  return { nuevo };
+})();
+
+/** Dibuja el informe completo en un PDF y devuelve el Blob. */
+function pdfInforme(d){
+  const AZUL = "#4A86E8", CLARO = "#C9DAF8", VERDE = "#D0E0E3";
+  const GRIS = "#6b635a", TINTA = "#1c1a17";
+  const p = PDF.nuevo();
+  const X = p.M, ANCHO_UTIL = p.anchoUtil;
+
+  // --- Cabecera ---
+  p.texto("Informe de horas", X, p.y - 16, 17, { negrita:true, color:TINTA });
+  const et = etiquetaRango(d.desde, d.hasta);
+  p.texto(et.charAt(0).toUpperCase() + et.slice(1), X, p.y - 30, 10, { color:GRIS });
+  const dcha = X + ANCHO_UTIL;
+  if (S.perfil.nombre) p.texto(S.perfil.nombre, dcha, p.y - 14, 10, { al:"der", negrita:true, color:TINTA });
+  if (S.perfil.empresa) p.texto(S.perfil.empresa, dcha, p.y - 26, 9.5, { al:"der", color:GRIS });
+  p.texto(`${d.desde.split("-").reverse().join("/")} - ${d.hasta.split("-").reverse().join("/")}`,
+          dcha, p.y - 38, 8.5, { al:"der", color:GRIS });
+  p.y -= 46;
+  p.linea(X, p.y, dcha, p.y, TINTA, 1.5);
+  p.y -= 20;
+
+  // --- Resumen ---
+  const filas = [
+    ["Días trabajados", String(d.diasTrab)],
+    ["Horas totales", num(d.horas) + " h"],
+    ["De ellas, ordinarias", num(d.ordinarias) + " h"],
+    ["Horas extra", num(d.extraPagada) + " h"]
+  ];
+  if (d.noComputada > 0) filas.push(["Horas no computadas", num(d.noComputada) + " h"]);
+  if (EXP.importes) filas.push(["Importe de las horas extra", eur(d.importe)]);
+  Object.entries(d.ausencias).forEach(([k,v]) => filas.push([TIPOS[k].n, v + (v===1?" día":" días")]));
+
+  filas.forEach(([a,b], i) => {
+    p.sitio(16);
+    p.texto(a, X, p.y, 10, { color:TINTA });
+    p.texto(b, dcha, p.y, 10, { al:"der", negrita:true, color:TINTA });
+    p.linea(X, p.y - 4, dcha, p.y - 4, "#e8e2d6", 0.5);
+    p.y -= 16;
+  });
+  p.y -= 12;
+
+  // --- Horas por obra ---
+  if (EXP.porObra && d.obras.length){
+    p.sitio(60);
+    p.texto("HORAS POR OBRA", X, p.y, 9, { negrita:true, color:"#8A6A4A" });
+    p.y -= 15;
+    const cJ = X + 330, cH = X + 430;
+    p.rect(X, p.y - 4, ANCHO_UTIL, 16, AZUL);
+    p.texto("Obra", X + 6, p.y, 9, { negrita:true, color:"#FFFFFF" });
+    p.texto("Jornadas", cJ, p.y, 9, { al:"centro", negrita:true, color:"#FFFFFF" });
+    p.texto("Horas", cH, p.y, 9, { al:"centro", negrita:true, color:"#FFFFFF" });
+    p.y -= 18;
+    d.obras.forEach((o, i) => {
+      if (p.sitio(18)) p.y -= 6;
+      if (i % 2 === 0) p.rect(X, p.y - 4, ANCHO_UTIL, 15, "#f4f7fd");
+      p.texto(o.nombre, X + 6, p.y, 9.5, { color:TINTA });
+      p.texto(String(o.dias), cJ, p.y, 9.5, { al:"centro", color:TINTA });
+      p.texto(num(o.horas), cH, p.y, 9.5, { al:"centro", negrita:true, color:TINTA });
+      p.y -= 15;
+    });
+    p.sitio(20);
+    p.rect(X, p.y - 4, ANCHO_UTIL, 16, VERDE);
+    p.texto("TOTAL", X + 6, p.y, 9.5, { negrita:true, color:TINTA });
+    p.texto(String(d.diasTrab), cJ, p.y, 9.5, { al:"centro", negrita:true, color:TINTA });
+    p.texto(num(d.horas), cH, p.y, 9.5, { al:"centro", negrita:true, color:TINTA });
+    p.y -= 30;
+  }
+
+  // --- Bloques por día, con la maqueta de la hoja de siempre ---
+  if (EXP.detalle && d.dias.length){
+    const semanas = new Map();
+    d.dias.forEach(c => {
+      const l = lunes(c.fecha);
+      if (!semanas.has(l)) semanas.set(l, []);
+      semanas.get(l).push(c);
+    });
+    const BW = 165, GAP = 10, FILA = 14;
+    const cObra = 93, cHoras = 36, cTotal = 36;
+
+    for (const [lun, dias] of [...semanas.entries()].sort()){
+      p.sitio(70);
+      p.texto(`${fmtCorta(lun)} - ${fmtCorta(addDias(lun,6))}`.toUpperCase(), X, p.y, 9,
+              { negrita:true, color:"#8A6A4A" });
+      p.y -= 16;
+
+      const orden = dias.slice().sort((a,b) => a.fecha < b.fecha ? -1 : 1);
+      const partesDe = c => c.partes.length ? c.partes : [{ obra:TIPOS[c.tipo].n, horas:c.horasAus||0 }];
+
+      // Se dibujan de tres en tres, todos alineados por arriba
+      for (let i = 0; i < orden.length; i += 3){
+        const grupo = orden.slice(i, i + 3);
+        const altoFila = FILA * (1 + Math.max(...grupo.map(c => partesDe(c).length)));
+        p.sitio(altoFila + 10);
+        const yTop = p.y;
+
+        grupo.forEach((c, col) => {
+          const bx = X + col * (BW + GAP);
+          const partes = partesDe(c);
+          let by = yTop;
+
+          p.rect(bx, by - FILA + 4, BW, FILA, AZUL);
+          const dia = DIAS[dow(c.fecha)];
+          p.texto(dia.charAt(0).toUpperCase() + dia.slice(1), bx + 5, by - 6, 8.5, { negrita:true, color:"#FFFFFF" });
+          p.texto("Horas", bx + cObra + cHoras/2, by - 6, 8.5, { al:"centro", negrita:true, color:"#FFFFFF" });
+          p.texto("Total", bx + cObra + cHoras + cTotal/2, by - 6, 8.5, { al:"centro", negrita:true, color:"#FFFFFF" });
+          by -= FILA;
+
+          // Casilla del total: una sola, tan alta como las filas del día
+          p.rect(bx + cObra + cHoras, by - FILA*partes.length + 4, cTotal, FILA*partes.length, VERDE);
+          p.texto(num(c.horas), bx + cObra + cHoras + cTotal/2, by - 6, 8.5, { al:"centro", negrita:true, color:TINTA });
+
+          partes.forEach(pa => {
+            p.rect(bx, by - FILA + 4, cObra + cHoras, FILA, CLARO);
+            let nom = String(pa.obra);
+            if (anchoTextoAprox(nom, 8.5) > cObra - 10){
+              while (nom.length > 3 && anchoTextoAprox(nom + "…", 8.5) > cObra - 10) nom = nom.slice(0, -1);
+              nom += "…";
+            }
+            p.texto(nom, bx + 5, by - 6, 8.5, { color:TINTA });
+            p.texto(num(pa.horas), bx + cObra + cHoras/2, by - 6, 8.5, { al:"centro", color:TINTA });
+            by -= FILA;
+          });
+        });
+        p.y = yTop - altoFila - 8;
+      }
+
+      // Total de la semana
+      const tot = redondea(dias.reduce((s,c) => s + c.horas, 0));
+      p.sitio(24);
+      p.rect(X, p.y - FILA + 4, BW, FILA, AZUL);
+      p.texto("Total semana", X + 5, p.y - 6, 8.5, { negrita:true, color:"#FFFFFF" });
+      p.texto(num(tot), X + cObra + cHoras + cTotal/2, p.y - 6, 8.5, { al:"centro", negrita:true, color:"#FFFFFF" });
+      p.y -= 34;
+    }
+  }
+
+  // --- Pie ---
+  p.sitio(30);
+  p.linea(X, p.y + 4, dcha, p.y + 4, "#ded7c8", 0.5);
+  p.texto(`Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}` +
+          (EXP.importes ? "" : " · Informe de horas, sin importes económicos"),
+          X + ANCHO_UTIL/2, p.y - 8, 8, { al:"centro", color:"#8a8177" });
+
+  return p.blob();
+}
+/* Ancho aproximado para recortar nombres largos de obra */
+function anchoTextoAprox(s, tam){ return String(s).length * tam * 0.52; }
+
+function nombrePDF(){
+  const quien = (S.perfil.nombre||"").trim().split(" ")[0].toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]/g,"");
+  return `horas-${quien ? quien+"-" : ""}${expDesde}_${expHasta}.pdf`;
+}
+
+/** Compartir el PDF por WhatsApp, correo, etc. Si no se puede, se descarga. */
+async function compartirPDF(){
+  const d = datosRango(expDesde, expHasta);
+  if (!d.dias.length){ toast("No hay jornadas en ese periodo"); return; }
+  let blob;
+  try { blob = pdfInforme(d); }
+  catch(e){ apuntarError("pdf", e); toast("No se ha podido generar el PDF"); return; }
+
+  const archivo = new File([blob], nombrePDF(), { type:"application/pdf" });
+  try{
+    if (navigator.canShare && navigator.canShare({ files:[archivo] })){
+      await navigator.share({
+        files: [archivo],
+        title: "Informe de horas",
+        text: `Horas de ${etiquetaRango(expDesde, expHasta)}` +
+              (S.perfil.nombre ? ` · ${S.perfil.nombre}` : "")
+      });
+      cerrarSheet();
+      return;
+    }
+  } catch(e){
+    if (e && e.name === "AbortError") return;      // el usuario ha cancelado
+    apuntarError("compartir-pdf", e);
+  }
+  descargarPDF(blob);
+}
+function descargarPDF(blob){
+  const d = blob || (() => { try { return pdfInforme(datosRango(expDesde, expHasta)); } catch(e){ apuntarError("pdf", e); return null; } })();
+  if (!d) { toast("No se ha podido generar el PDF"); return; }
+  const url = URL.createObjectURL(d);
+  const a = document.createElement("a");
+  a.href = url; a.download = nombrePDF();
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+  cerrarSheet();
+  toast("PDF descargado");
 }
 
 /* ---------- Informe imprimible / PDF ---------- */
@@ -2693,8 +3018,10 @@ document.addEventListener("click", async ev => {
       }
       case "exportar-semana": return abrirExportar(vSemana, addDias(vSemana,6));
       case "exportar-mes":    return abrirExportar(`${vMes}-01`, finDeMes(vMes));
-      case "exp-csv":         return exportarCSV();
-      case "exp-excel":       return exportarExcel();
+      case "exp-csv":            return exportarCSV();
+      case "exp-excel":          return exportarExcel();
+      case "exp-compartir-pdf":  return compartirPDF();
+      case "exp-pdf-bajar":      return descargarPDF(null);
       case "exp-pdf":         return verInforme();
       case "cerrar-informe":  return cerrarInforme();
       case "backup": return descargarBackup(false);
