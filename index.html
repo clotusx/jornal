@@ -223,15 +223,52 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;
 .pasos i.on{background:var(--accent)}
 
 .hide{display:none!important}
+
+/* ---------- Informe exportable ---------- */
+#informe{display:none}
+body.imprimiendo #informe{display:block}
+body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!important}
+.barra-inf{position:sticky;top:0;z-index:5;display:flex;gap:8px;justify-content:center;
+  flex-wrap:wrap;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:calc(12px + var(--safe-t)) 14px 12px}
+.hoja{max-width:760px;margin:0 auto;padding:22px 18px calc(40px + var(--safe-b));
+  background:#fff;color:#1c1a17}
+.hoja .cabecera{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;
+  border-bottom:2.5px solid #1c1a17;padding-bottom:12px;margin-bottom:18px}
+.hoja .titulo{font-family:var(--serif);font-size:23px;font-weight:700;line-height:1.15}
+.hoja .periodo{font-size:13.5px;color:#6b635a;margin-top:3px}
+.hoja .periodo::first-letter{text-transform:uppercase}   /* solo la inicial, no cada palabra */
+.hoja .quien-inf{text-align:right;font-size:13px;line-height:1.45}
+.hoja h3{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#8A6A4A;
+  margin:24px 0 8px;font-weight:700}
+.hoja table{width:100%;border-collapse:collapse;font-size:13px}
+.hoja .resumen td{padding:6px 0;border-bottom:1px solid #eee}
+.hoja .resumen tr:last-child td{border-bottom:0}
+.hoja .resumen .destaca td{border-top:1.5px solid #1c1a17;font-size:14.5px;padding-top:9px}
+.hoja .datos th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#6b635a;
+  border-bottom:1.5px solid #1c1a17;padding:6px 7px;font-weight:700}
+.hoja .datos td{padding:6px 7px;border-bottom:1px solid #f0ece4;vertical-align:top}
+.hoja .datos tr.ini td{border-top:1px solid #ded7c8}
+.hoja .datos tr.total td{border-top:1.5px solid #1c1a17;border-bottom:0;font-weight:700}
+.hoja .pie{margin-top:26px;padding-top:10px;border-top:1px solid #ded7c8;
+  font-size:10.5px;color:#8a8177;text-align:center}
+
 @media print{
-  nav,#splash,.no-print{display:none!important}
-  body{background:#fff}
+  nav,#splash,.no-print,.barra-inf,#toast,.sheet,#modal{display:none!important}
+  html,body{background:#fff!important;margin:0;padding:0}
+  body.imprimiendo #informe{display:block}
+  .hoja{max-width:none;padding:0;box-shadow:none}
+  .hoja table{font-size:10.5pt}
+  .hoja .datos thead{display:table-header-group}   /* repetir cabecera en cada página */
+  .hoja .datos tr{break-inside:avoid}
+  .hoja h3{break-after:avoid}
   #app{max-width:none;padding:0}
   .card{break-inside:avoid;border-color:#ccc}
   .hero{background:#fff;color:#000;border:2px solid #000}
   .hero .lbl,.hero .grid div{color:#444}
   .hero .grid b{color:#000}
   .hero::after{display:none}
+  @page{margin:14mm}
 }
 </style>
 </head>
@@ -272,6 +309,8 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;
   </div>
 </nav>
 
+<div id="informe"></div>
+
 <div id="toast"></div>
 <div class="sheet" id="sheet"><div class="bg" data-cerrar></div><div class="pan"><div class="grab"></div><div id="sheetBody"></div></div></div>
 
@@ -297,13 +336,20 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.3.0";
+const APP_VER = "1.4.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.4.0": [
+    "Informes para la empresa: eliges la semana, el mes o el rango de fechas que quieras.",
+    "Puedes generar el informe SIN precios ni importes, solo con las horas.",
+    "Las horas salen agrupadas por obra, además del detalle día a día.",
+    "Informe imprimible en condiciones: se ve antes de imprimir y sale limpio en PDF.",
+    "En la pestaña Semana, el detalle va ahora de lunes en adelante."
+  ],
   "1.3.0": [
     "Código QR para compartir la app: el compañero apunta con la cámara y listo.",
     "Guardar copia es ahora un solo toque: se abre directamente «Guardar en Archivos».",
@@ -1271,7 +1317,12 @@ function vistaSemana(){
   ${aus.length ? `<div class="card"><h2>Ausencias</h2>
     ${aus.map(([k,v]) => `<div class="stat"><span>${TIPOS[k].n}</span><b>${v} ${v===1?"día":"días"}</b></div>`).join("")}
     ${a.horasAus>0 ? `<div class="stat"><span class="muted">Horas totales</span><b>${num(a.horasAus)} h</b></div>`:""}</div>`:""}
-  ${listaDias(a.dias.filter(d => d.horas>0 || d.tipo!=="trabajo").map(d=>d.fecha).reverse(), "Detalle")}`;
+  <div class="row no-print" style="gap:8px;margin-bottom:14px">
+    <button class="btn sec" data-acc="exportar-semana">Informe de esta semana</button>
+  </div>
+
+  ${/* De lunes en adelante: se lee como la hoja de la semana, no al revés */""}
+  ${listaDias(a.dias.filter(d => d.horas>0 || d.tipo!=="trabajo").map(d=>d.fecha), "Detalle")}`;
 }
 
 /* ---------- MES ---------- */
@@ -1326,8 +1377,7 @@ function vistaMes(){
   ${Object.keys(a.ausencias).length ? `<div class="card"><h2>Ausencias del mes</h2>
     ${Object.entries(a.ausencias).map(([k,v]) => `<div class="stat"><span>${TIPOS[k].n}</span><b>${v} ${v===1?"día":"días"}</b></div>`).join("")}</div>`:""}
   <div class="row no-print" style="gap:8px;margin-bottom:14px">
-    <button class="btn sec" data-acc="csv">Exportar CSV</button>
-    <button class="btn sec" data-acc="print">Informe PDF</button>
+    <button class="btn sec" data-acc="exportar-mes">Informe de este mes</button>
   </div>
   ${listaDias(a.dias.map(d=>d.fecha), "Jornadas del mes")}`;
 }
@@ -1605,28 +1655,248 @@ function descarga(nombre, contenido, tipo){
     return true;
   } catch(e){ apuntarError("descarga", e); toast("No se ha podido descargar"); return false; }
 }
+/* ============================================================
+   Informes exportables
+   Cualquier rango de fechas, agrupado por obra, y con la opción de
+   ocultar los importes: normalmente esto se le manda a la empresa y
+   ahí solo interesan las horas.
+   ============================================================ */
+let expDesde = "", expHasta = "";
+const EXP = { importes:false, porObra:true, detalle:true };
+
+/** Agrega todo lo registrado entre dos fechas, ambas incluidas. */
+function datosRango(desde, hasta){
+  const r = { desde, hasta, dias:[], porObra:{}, horas:0, ordinarias:0, extra:0,
+              extraPagada:0, noComputada:0, importe:0, diasTrab:0, ausencias:{} };
+  if (desde > hasta) return r;
+  let f = desde, guardia = 0;
+  while (f <= hasta && guardia++ < 4000){
+    const dd = S.dias[f];
+    if (dd){
+      const c = calcDia(f, dd, S.config);
+      if (c.horas > 0 || c.tipo !== "trabajo"){
+        r.dias.push(c);
+        r.horas += c.horas; r.extra += c.extra; r.extraPagada += c.extraPagada;
+        r.noComputada += c.noComputada; r.importe += c.importe;
+        if (c.horas > 0) r.diasTrab++;
+        if (c.tipo !== "trabajo") r.ausencias[c.tipo] = (r.ausencias[c.tipo]||0) + 1;
+        c.partes.forEach(p => {
+          const o = r.porObra[p.obra] || (r.porObra[p.obra] = { horas:0, dias:new Set() });
+          o.horas = redondea(o.horas + p.horas);
+          o.dias.add(f);
+        });
+      }
+    }
+    f = addDias(f, 1);
+  }
+  r.ordinarias = redondea(r.horas - r.extra);
+  ["horas","ordinarias","extra","extraPagada","noComputada","importe"].forEach(k => r[k] = redondea(r[k]));
+  r.obras = Object.entries(r.porObra)
+    .map(([n,o]) => ({ nombre:n, horas:o.horas, dias:o.dias.size }))
+    .sort((a,b) => b.horas - a.horas);
+  return r;
+}
+
+function etiquetaRango(desde, hasta){
+  if (desde === hasta) return fmtLarga(desde);
+  const finMes = f => { const d = parse(f); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()).padStart(2,"0")}`; };
+  if (desde.slice(8) === "01" && hasta === finMes(desde))
+    return `${MESES[+desde.slice(5,7)-1]} de ${desde.slice(0,4)}`;
+  if (lunes(desde) === desde && hasta === addDias(desde,6))
+    return `semana del ${fmtCorta(desde)} al ${fmtCorta(hasta)} de ${parse(hasta).getFullYear()}`;
+  return `del ${fmtCorta(desde)} al ${fmtCorta(hasta)} de ${parse(hasta).getFullYear()}`;
+}
+const finDeMes = m => `${m}-${String(new Date(+m.slice(0,4), +m.slice(5,7), 0).getDate()).padStart(2,"0")}`;
+function mesAnterior(m){
+  const d = new Date(+m.slice(0,4), +m.slice(5,7)-2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+
+/* ---------- Pantalla de exportación ---------- */
+function abrirExportar(desde, hasta){
+  expDesde = desde || lunes(hoyISO());
+  expHasta = hasta || addDias(expDesde, 6);
+  pintarExportar();
+}
+function pintarExportar(){
+  const d = datosRango(expDesde, expHasta);
+  const lunHoy = lunes(hoyISO()), mesHoy = mesDe(hoyISO()), mesAnt = mesAnterior(mesHoy);
+  const atajos = [
+    ["Esta semana",   lunHoy,               addDias(lunHoy,6)],
+    ["Semana pasada", addDias(lunHoy,-7),   addDias(lunHoy,-1)],
+    ["Este mes",      `${mesHoy}-01`,       finDeMes(mesHoy)],
+    ["Mes pasado",    `${mesAnt}-01`,       finDeMes(mesAnt)]
+  ];
+  abrirSheet(`<h2>Informe de horas</h2>
+    <p class="small muted" style="margin:0 0 14px">Elige el periodo y qué quieres que aparezca.
+      Si es para la empresa, normalmente basta con las horas.</p>
+
+    <div class="small" style="font-weight:600;margin-bottom:6px">Periodo</div>
+    <div class="chips">
+      ${atajos.map(([t,a,b]) => `<button class="chip ${expDesde===a&&expHasta===b?"on":""}"
+        data-rango="${a}|${b}">${t}</button>`).join("")}
+    </div>
+    <div class="row" style="gap:8px;margin:10px 0 4px">
+      <div style="flex:1"><div class="tiny muted" style="margin-bottom:3px">Desde</div>
+        <input type="date" id="expD" value="${expDesde}" class="mono" style="font-size:14px"></div>
+      <div style="flex:1"><div class="tiny muted" style="margin-bottom:3px">Hasta</div>
+        <input type="date" id="expH" value="${expHasta}" class="mono" style="font-size:14px"></div>
+    </div>
+    <p class="tiny muted" style="margin:8px 0 16px">${esc(etiquetaRango(expDesde, expHasta))} ·
+      <b>${d.dias.length} jornada${d.dias.length===1?"":"s"}</b> · ${num(d.horas)} h</p>
+
+    <div class="small" style="font-weight:600;margin-bottom:2px">Contenido</div>
+    ${[["importes","Incluir precios e importes",
+        "Desactivado, el informe solo muestra horas. Es lo habitual para mandarlo a la empresa."],
+       ["porObra","Resumen por obra",
+        "Una tabla con el total de horas dedicadas a cada obra."],
+       ["detalle","Detalle día a día",
+        "Cada jornada con sus obras y sus horas."]
+      ].map(([k,l,ayuda]) => `
+      <div class="between" style="align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)">
+        <div style="flex:1;padding-right:10px">
+          <div class="small" style="font-weight:600">${l}</div>
+          <div class="tiny muted">${ayuda}</div>
+        </div>
+        <button class="chip ${EXP[k]?"on":""}" style="flex:none" data-expcfg="${k}">${EXP[k]?"Sí":"No"}</button>
+      </div>`).join("")}
+
+    <div style="display:grid;gap:8px;margin-top:18px">
+      <button class="btn" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver informe e imprimir / PDF</button>
+      <button class="btn sec" data-acc="exp-csv" ${d.dias.length?"":"disabled"}>Descargar CSV para Excel</button>
+      <button class="btn ghost" data-cerrar>Cancelar</button>
+    </div>
+    ${d.dias.length ? "" : `<p class="tiny" style="color:var(--warn);text-align:center;margin-top:10px">
+      No hay ninguna jornada registrada en ese periodo.</p>`}`);
+}
+
+/* ---------- CSV ---------- */
 function exportarCSV(){
-  const a = calcMes(vMes);
-  const F = [["Trabajador", S.perfil.nombre||""],["Empresa", S.perfil.empresa||""],
-             ["Periodo", `${MESES[+vMes.slice(5)-1]} ${vMes.slice(0,4)}`],[],
-             ["Fecha","Día","Tipo","Obra","Horas","Total día","Horas extra","Importe extra","No computadas","Nota"]];
-  a.dias.slice().reverse().forEach(c => {
-    const nota = (S.dias[c.fecha]||{}).nota || "";
-    if (!c.partes.length)
-      F.push([c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n, "", "", num(c.horas), "", "", "", nota]);
-    c.partes.forEach((p,i) => F.push([
-      c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n, p.obra, num(p.horas),
-      i===0?num(c.horas):"", i===0?num(c.extraPagada):"", i===0?num(c.importe):"",
-      i===0&&c.noComputada?num(c.noComputada):"", i===0?nota:""
-    ]));
-  });
-  F.push([], ["","","","","","TOTAL HORAS",num(a.horas)],
-             ["","","","","","HORAS EXTRA",num(a.extraPagada)],
-             ["","","","","","IMPORTE EXTRAS",num(a.importeExtra)],
-             ["","","","","","SALARIO BASE",num(S.config.baseNeto)],
-             ["","","","","","TOTAL A COBRAR",num(a.total)]);
-  const csv = "﻿" + F.map(f => f.map(c => `"${String(c??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
-  if (descarga(`jornal-${vMes}.csv`, csv, "text/csv;charset=utf-8")) toast("CSV descargado — se abre con Excel");
+  const d = datosRango(expDesde, expHasta);
+  const F = [];
+  F.push(["INFORME DE HORAS"]);
+  F.push(["Trabajador", S.perfil.nombre || ""]);
+  if (S.perfil.empresa) F.push(["Empresa", S.perfil.empresa]);
+  F.push(["Periodo", etiquetaRango(expDesde, expHasta)]);
+  F.push(["Desde", expDesde, "Hasta", expHasta]);
+  F.push(["Generado", new Date().toLocaleDateString("es-ES")]);
+  F.push([]);
+
+  F.push(["RESUMEN"]);
+  F.push(["Días trabajados", d.diasTrab]);
+  F.push(["Horas totales", num(d.horas)]);
+  F.push(["Horas ordinarias", num(d.ordinarias)]);
+  F.push(["Horas extra", num(d.extraPagada)]);
+  if (d.noComputada > 0) F.push(["Horas no computadas", num(d.noComputada)]);
+  if (EXP.importes) F.push(["Importe de las horas extra", num(d.importe)]);
+  Object.entries(d.ausencias).forEach(([k,v]) => F.push([TIPOS[k].n, v + (v===1?" día":" días")]));
+  F.push([]);
+
+  if (EXP.porObra && d.obras.length){
+    F.push(["HORAS POR OBRA"]);
+    F.push(["Obra","Jornadas","Horas"]);
+    d.obras.forEach(o => F.push([o.nombre, o.dias, num(o.horas)]));
+    F.push(["", "TOTAL", num(d.obras.reduce((s,o)=>s+o.horas,0))]);
+    F.push([]);
+  }
+
+  if (EXP.detalle){
+    F.push(["DETALLE POR JORNADA"]);
+    const cab = ["Fecha","Día","Tipo","Obra","Horas","Total del día","Horas extra"];
+    if (EXP.importes) cab.push("Importe extra");
+    cab.push("No computadas","Nota");
+    F.push(cab);
+    d.dias.forEach(c => {
+      const nota = (S.dias[c.fecha]||{}).nota || "";
+      const filas = c.partes.length ? c.partes : [null];
+      filas.forEach((p,i) => {
+        const f = [c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n,
+                   p ? p.obra : "", p ? num(p.horas) : "",
+                   i===0 ? num(c.horas) : "", i===0 ? num(c.extraPagada) : ""];
+        if (EXP.importes) f.push(i===0 ? num(c.importe) : "");
+        f.push(i===0 && c.noComputada ? num(c.noComputada) : "", i===0 ? nota : "");
+        F.push(f);
+      });
+    });
+  }
+
+  const csv = "﻿" + F.map(f => f.map(c => `"${String(c ?? "").replace(/"/g,'""')}"`).join(";")).join("\r\n");
+  const nom = `horas-${S.perfil.nombre ? S.perfil.nombre.split(" ")[0].toLowerCase()+"-" : ""}${expDesde}_${expHasta}.csv`;
+  if (descarga(nom, csv, "text/csv;charset=utf-8")){ cerrarSheet(); toast("CSV descargado — se abre con Excel"); }
+}
+
+/* ---------- Informe imprimible / PDF ---------- */
+function verInforme(){
+  const d = datosRango(expDesde, expHasta);
+  const th = (t, num) => `<th style="text-align:${num?"right":"left"}">${t}</th>`;
+  const td = (t, n) => `<td style="text-align:${n?"right":"left"}${n?";font-variant-numeric:tabular-nums":""}">${t}</td>`;
+
+  let html = `
+  <div class="hoja">
+    <div class="cabecera">
+      <div>
+        <div class="titulo">Informe de horas</div>
+        <div class="periodo">${esc(etiquetaRango(expDesde, expHasta))}</div>
+      </div>
+      <div class="quien-inf">
+        ${S.perfil.nombre ? `<b>${esc(S.perfil.nombre)}</b><br>` : ""}
+        ${S.perfil.empresa ? esc(S.perfil.empresa) + "<br>" : ""}
+        <span class="tiny">${expDesde.split("-").reverse().join("/")} – ${expHasta.split("-").reverse().join("/")}</span>
+      </div>
+    </div>
+
+    <table class="resumen"><tbody>
+      <tr><td>Días trabajados</td>${td("<b>"+d.diasTrab+"</b>",1)}</tr>
+      <tr><td>Horas totales</td>${td("<b>"+num(d.horas)+" h</b>",1)}</tr>
+      <tr><td>De ellas, ordinarias</td>${td(num(d.ordinarias)+" h",1)}</tr>
+      <tr><td>Horas extra</td>${td("<b>"+num(d.extraPagada)+" h</b>",1)}</tr>
+      ${d.noComputada>0 ? `<tr><td>Horas no computadas</td>${td(num(d.noComputada)+" h",1)}</tr>`:""}
+      ${EXP.importes ? `<tr class="destaca"><td>Importe de las horas extra</td>${td("<b>"+eur(d.importe)+"</b>",1)}</tr>`:""}
+      ${Object.entries(d.ausencias).map(([k,v]) =>
+        `<tr><td>${TIPOS[k].n}</td>${td(v+(v===1?" día":" días"),1)}</tr>`).join("")}
+    </tbody></table>`;
+
+  if (EXP.porObra && d.obras.length){
+    html += `<h3>Horas por obra</h3>
+    <table class="datos"><thead><tr>${th("Obra")}${th("Jornadas",1)}${th("Horas",1)}</tr></thead><tbody>
+      ${d.obras.map(o => `<tr><td>${esc(o.nombre)}</td>${td(o.dias,1)}${td("<b>"+num(o.horas)+"</b>",1)}</tr>`).join("")}
+      <tr class="total"><td>Total</td>${td(d.diasTrab,1)}${td("<b>"+num(d.obras.reduce((s,o)=>s+o.horas,0))+"</b>",1)}</tr>
+    </tbody></table>`;
+  }
+
+  if (EXP.detalle && d.dias.length){
+    html += `<h3>Detalle por jornada</h3>
+    <table class="datos"><thead><tr>${th("Fecha")}${th("Día")}${th("Obra")}${th("Horas",1)}${th("Total",1)}${th("Extra",1)}${EXP.importes?th("Importe",1):""}</tr></thead><tbody>
+      ${d.dias.map(c => {
+        const filas = c.partes.length ? c.partes : [null];
+        return filas.map((p,i) => `<tr${i===0?' class="ini"':''}>
+          ${i===0 ? `<td rowspan="${filas.length}">${c.fecha.split("-").reverse().join("/")}</td>
+                     <td rowspan="${filas.length}" style="text-transform:capitalize">${DIAS[dow(c.fecha)]}</td>` : ""}
+          <td>${p ? esc(p.obra) : `<i>${TIPOS[c.tipo].n}</i>`}</td>
+          ${td(p ? num(p.horas) : "—", 1)}
+          ${i===0 ? `<td rowspan="${filas.length}" style="text-align:right"><b>${num(c.horas)}</b></td>
+                     <td rowspan="${filas.length}" style="text-align:right">${c.extraPagada>0?num(c.extraPagada):"—"}</td>
+                     ${EXP.importes?`<td rowspan="${filas.length}" style="text-align:right">${c.importe>0?eur(c.importe):"—"}</td>`:""}` : ""}
+        </tr>`).join("");
+      }).join("")}
+    </tbody></table>`;
+  }
+
+  html += `<div class="pie">Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}${
+    EXP.importes ? "" : " · Informe de horas, sin importes económicos"}</div></div>`;
+
+  $("#informe").innerHTML = `
+    <div class="barra-inf no-print">
+      <button class="btn" style="width:auto;padding:10px 18px" onclick="window.print()">Imprimir o guardar en PDF</button>
+      <button class="btn ghost" style="width:auto;padding:10px 18px" data-acc="cerrar-informe">Cerrar</button>
+    </div>${html}`;
+  document.body.classList.add("imprimiendo");
+  cerrarSheet();
+  window.scrollTo(0,0);
+}
+function cerrarInforme(){
+  document.body.classList.remove("imprimiendo");
+  $("#informe").innerHTML = "";
 }
 /* ============================================================
    Copias de seguridad en archivo
@@ -2096,7 +2366,7 @@ async function compartir(){
    Eventos (delegación: un solo listener para toda la app)
    ============================================================ */
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-acc],[data-tipo],[data-obra],[data-quitar],[data-editar],[data-borrar],[data-sem],[data-mes],[data-tog],[data-cfg],[data-ren],[data-renok],[data-quitobra],[data-snap],[data-cerrar],[data-onb]");
+  const t = ev.target.closest("[data-acc],[data-tipo],[data-obra],[data-quitar],[data-editar],[data-borrar],[data-sem],[data-mes],[data-tog],[data-cfg],[data-ren],[data-renok],[data-quitobra],[data-snap],[data-cerrar],[data-onb],[data-rango],[data-expcfg]");
   if (!t) return;
   const d = t.dataset;
   try{
@@ -2120,6 +2390,8 @@ document.addEventListener("click", async ev => {
     }
     if (d.ren !== undefined) return renombrarObra(+d.ren);
     if (d.renok !== undefined) return confirmarRenombrar(+d.renok);
+    if (d.rango){ const [a,b] = d.rango.split("|"); expDesde = a; expHasta = b; return pintarExportar(); }
+    if (d.expcfg){ EXP[d.expcfg] = !EXP[d.expcfg]; return pintarExportar(); }
     if (d.quitobra !== undefined) return quitarObra(+d.quitobra);
     if (d.snap !== undefined) return restaurarSnap(+d.snap);
     switch (d.acc){
@@ -2134,8 +2406,11 @@ document.addEventListener("click", async ev => {
         if (!ok) return;
         delete S.nominas[vMes]; await guardar(); return render();
       }
-      case "csv": return exportarCSV();
-      case "print": return window.print();
+      case "exportar-semana": return abrirExportar(vSemana, addDias(vSemana,6));
+      case "exportar-mes":    return abrirExportar(`${vMes}-01`, finDeMes(vMes));
+      case "exp-csv":         return exportarCSV();
+      case "exp-pdf":         return verInforme();
+      case "cerrar-informe":  return cerrarInforme();
       case "backup": return descargarBackup(false);
       case "elegir-carpeta": return elegirCarpeta();
       case "olvidar-carpeta": return olvidarCarpeta();
@@ -2177,6 +2452,8 @@ document.addEventListener("input", ev => {
 document.addEventListener("change", ev => {
   const el = ev.target;
   try{
+    if (el.id === "expD"){ expDesde = el.value || expDesde; if (expHasta < expDesde) expHasta = expDesde; return pintarExportar(); }
+    if (el.id === "expH"){ expHasta = el.value || expHasta; if (expHasta < expDesde) expDesde = expHasta; return pintarExportar(); }
     if (el.id === "fIn"){ vFecha = el.value || hoyISO(); render(); }
     else if (el.id === "fileIn") restaurar(el);
     else if (el.dataset.cfg) setCfg(el.dataset.cfg, el.value);
