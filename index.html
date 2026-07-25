@@ -349,13 +349,19 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.6.0";
+const APP_VER = "1.7.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.7.0": [
+    "Los informes ya descuentan el descanso: un lunes de 8,5 h y un martes de 10,5 h salen como 18 h.",
+    "El resumen enseña las horas trabajadas, el descanso restado y las horas a computar, para que se vea de dónde sale el número.",
+    "En la app tus jornadas se siguen viendo tal cual las apuntas (8,5 h es 8,5 h).",
+    "Puedes cambiar el descanso en Ajustes, o ponerlo a 0 si a ti no te lo descuentan."
+  ],
   "1.6.0": [
     "Botón «Compartir PDF»: el informe sale como archivo y se manda por WhatsApp, correo o donde quieras.",
     "El PDF lo genera la propia app, ya no hace falta pasar por el diálogo de imprimir.",
@@ -405,7 +411,8 @@ const TIPOS = {
 };
 const CFG_DEF = {
   baseNeto:1400, jornada:8.5, tarifaSemana:10, tarifaSabado:13,
-  finSemanaTodoExtra:true, finSemanaSoloEnteras:true, ausenciaCuentaJornada:true
+  descansoDia:0.5,            // lo que la empresa descuenta por descanso cada día
+  finSemanaTodoExtra:true, ausenciaCuentaJornada:true
 };
 
 /* ---------- Fechas, sin desfase de zona horaria ---------- */
@@ -833,19 +840,40 @@ async function guardar(fecha){
 /* ============================================================
    Motor de cálculo
    ============================================================ */
+/**
+ * Calcula un día.
+ *
+ * Las horas se guardan y se MUESTRAN tal cual se registran: un día de 8,5 h
+ * es un día de 8,5 h en toda la app. Lo que pasa es que la empresa descuenta
+ * un rato de descanso a cada día trabajado (media hora), así que las horas
+ * que de verdad se pagan son `netas` = horas − descanso.
+ *
+ *  L-V : extra = lo que pase de la jornada. El descanso va restado en los dos
+ *        lados (día y jornada), así que sale igual: 9,5 h → 1 h extra.
+ *  S-D : todas las horas netas son extra → 8,5 h son 8 h a 13 €.
+ */
 function calcDia(fecha, dia, cfg){
-  const r = { fecha, horas:0, horasAus:0, extra:0, extraPagada:0, noComputada:0,
-              importe:0, finde:esFinde(fecha), tipo:(dia&&dia.tipo)||"trabajo", partes:[] };
+  const r = { fecha, horas:0, horasAus:0, descanso:0, netas:0, extra:0, extraPagada:0,
+              noComputada:0, importe:0, finde:esFinde(fecha),
+              tipo:(dia&&dia.tipo)||"trabajo", partes:[] };
   if (!dia) return r;
   r.partes = dia.partes || [];
   r.horas = redondea(r.partes.reduce((s,p) => s + (Number(p.horas)||0), 0));
   r.horasAus = Number(dia.ausenciaHoras) || 0;
+
+  // Descanso: solo en días trabajados y nunca más de lo que se ha hecho
+  const desc = r.horas > 0 ? Math.min(Number(cfg.descansoDia) || 0, r.horas) : 0;
+  r.descanso = redondea(desc);
+  r.netas = redondea(r.horas - desc);
+
   const computables = r.horas + (cfg.ausenciaCuentaJornada ? r.horasAus : 0);
 
   if (r.finde && cfg.finSemanaTodoExtra){
-    r.extra = r.horas;
-    r.extraPagada = cfg.finSemanaSoloEnteras ? Math.floor(r.horas) : r.horas;
-    r.noComputada = redondea(r.horas - r.extraPagada);
+    r.extra = r.netas;                 // el fin de semana entero es extra
+    r.extraPagada = r.netas;
+    // Entre semana el descanso ya va restado en la jornada, así que solo se
+    // avisa de él los fines de semana, que es donde recorta lo que se cobra.
+    r.noComputada = r.descanso;
     r.importe = redondea(r.extraPagada * cfg.tarifaSabado);
   } else {
     r.extra = Math.max(0, redondea(computables - cfg.jornada));
@@ -856,18 +884,20 @@ function calcDia(fecha, dia, cfg){
 }
 function calcSemana(lun){
   if (cacheSem.has(lun)) return cacheSem.get(lun);
-  const a = { lunes:lun, dias:[], horas:0, horasAus:0, extra:0, extraPagada:0,
-              noComputada:0, importe:0, ordinarias:0, ausencias:{}, diasTrab:0 };
+  const a = { lunes:lun, dias:[], horas:0, netas:0, descanso:0, horasAus:0, extra:0,
+              extraPagada:0, noComputada:0, importe:0, ordinarias:0, ausencias:{}, diasTrab:0 };
   for (let i=0;i<7;i++){
     const f = addDias(lun,i), c = calcDia(f, S.dias[f], S.config);
     a.dias.push(c);
-    a.horas += c.horas; a.horasAus += c.horasAus; a.extra += c.extra;
+    a.horas += c.horas; a.netas += c.netas; a.descanso += c.descanso;
+    a.horasAus += c.horasAus; a.extra += c.extra;
     a.extraPagada += c.extraPagada; a.noComputada += c.noComputada; a.importe += c.importe;
     if (c.horas > 0) a.diasTrab++;
     if (c.tipo !== "trabajo") a.ausencias[c.tipo] = (a.ausencias[c.tipo]||0)+1;
   }
   a.ordinarias = a.horas - a.extra;
-  ["horas","horasAus","extra","extraPagada","noComputada","importe","ordinarias"].forEach(k => a[k]=redondea(a[k]));
+  ["horas","netas","descanso","horasAus","extra","extraPagada","noComputada","importe","ordinarias"]
+    .forEach(k => a[k]=redondea(a[k]));
   cacheSem.set(lun,a);
   if (cacheSem.size > 60) cacheSem.delete(cacheSem.keys().next().value);
   return a;
@@ -876,21 +906,23 @@ function calcMes(mes){
   if (cacheMes.has(mes)) return cacheMes.get(mes);
   const [y,m] = mes.split("-").map(Number);
   const fin = new Date(y,m,0).getDate();
-  const a = { mes, horas:0, extra:0, extraPagada:0, noComputada:0, importeExtra:0,
-              ordinarias:0, diasTrab:0, ausencias:{}, porObra:{}, dias:[] };
+  const a = { mes, horas:0, netas:0, descanso:0, extra:0, extraPagada:0, noComputada:0,
+              importeExtra:0, ordinarias:0, diasTrab:0, ausencias:{}, porObra:{}, dias:[] };
   for (let d=1; d<=fin; d++){
     const f = `${mes}-${String(d).padStart(2,"0")}`, dd = S.dias[f];
     if (!dd) continue;
     const c = calcDia(f, dd, S.config);
     a.dias.push(c);
-    a.horas += c.horas; a.extra += c.extra; a.extraPagada += c.extraPagada;
+    a.horas += c.horas; a.netas += c.netas; a.descanso += c.descanso;
+    a.extra += c.extra; a.extraPagada += c.extraPagada;
     a.noComputada += c.noComputada; a.importeExtra += c.importe;
     if (c.horas > 0) a.diasTrab++;
     if (c.tipo !== "trabajo") a.ausencias[c.tipo] = (a.ausencias[c.tipo]||0)+1;
     c.partes.forEach(p => a.porObra[p.obra] = redondea((a.porObra[p.obra]||0) + (Number(p.horas)||0)));
   }
   a.ordinarias = a.horas - a.extra;
-  ["horas","extra","extraPagada","noComputada","importeExtra","ordinarias"].forEach(k => a[k]=redondea(a[k]));
+  ["horas","netas","descanso","extra","extraPagada","noComputada","importeExtra","ordinarias"]
+    .forEach(k => a[k]=redondea(a[k]));
   a.total = redondea(S.config.baseNeto + a.importeExtra);
   a.dias.sort((x,z) => x.fecha < z.fecha ? 1 : -1);
   cacheMes.set(mes,a);
@@ -1047,10 +1079,15 @@ function pintarOnboarding(){
       </div>`,
     () => `<h2>Cómo te pagan el fin de semana</h2>
       <p class="small muted" style="margin:0 0 16px">Cada empresa lo hace distinto. Marca lo que se ajuste a la tuya.</p>
+      <div class="grupo">
+        <label for="o-desc">Descanso que te descuentan cada día (horas)</label>
+        <div class="ayuda">Muchas empresas restan el rato del bocadillo a cada jornada: si trabajas
+          8,5 h te pagan 8. Pon 0 si a ti no te lo descuentan.</div>
+        <input id="o-desc" type="number" step="0.25" min="0" max="4" inputmode="decimal" class="mono"
+               value="${c.descansoDia ?? ""}" placeholder="0.5" style="text-align:right">
+      </div>
       ${[["finSemanaTodoExtra","Todas las horas del sábado y domingo son extra",
           "Si lo dejas en NO, el fin de semana funciona como un día normal y solo cuentan las horas por encima de tu jornada."],
-         ["finSemanaSoloEnteras","Solo me pagan las horas completas",
-          "Si trabajas 8,5 h te pagan 8 y la media hora no se computa. Jornal la registra igual para que la tengas a la vista."],
          ["ausenciaCuentaJornada","El médico y los permisos cuentan como jornada",
           "Si vas 2 h al médico y trabajas 6,5 h, se considera que has cubierto tu jornada completa."]
         ].map(([k,l,ayuda]) => `
@@ -1065,11 +1102,13 @@ function pintarOnboarding(){
         </div>`).join("")}
       <div class="aviso info" style="margin-top:16px">
         <div><b>Ejemplo con lo que has puesto</b>
-        Un sábado de 8,5 h → ${(() => {
+        ${(() => {
           const cfg = {...CFG_DEF, ...c};
-          const r = calcDia(sabadoEjemplo(), {partes:[{obra:"x",horas:8.5}],tipo:"trabajo"}, cfg);
-          return `<b style="display:inline">${num(r.extraPagada)} h pagadas = ${eur(r.importe)}</b>` +
-                 (r.noComputada ? ` y ${num(r.noComputada)} h sin computar` : "");
+          const sa = calcDia(sabadoEjemplo(), {partes:[{obra:"x",horas:8.5}],tipo:"trabajo"}, cfg);
+          const lu = calcDia(lunes(hoyISO()), {partes:[{obra:"x",horas:10.5}],tipo:"trabajo"}, cfg);
+          return `Un lunes de 10,5 h → se pagan <b style="display:inline">${num(lu.netas)} h</b>,` +
+                 ` de ellas ${num(lu.extraPagada)} h extra = ${eur(lu.importe)}<br>` +
+                 `Un sábado de 8,5 h → <b style="display:inline">${num(sa.netas)} h = ${eur(sa.importe)}</b>`;
         })()}</div>
       </div>`
   ];
@@ -1104,6 +1143,9 @@ function leerPasoOnb(){
     onbDatos.tarifaSemana = n(v("#o-tsem"),     CFG_DEF.tarifaSemana);
     onbDatos.tarifaSabado = n(v("#o-tsab"),     CFG_DEF.tarifaSabado);
     if (onbDatos.jornada > 24) onbDatos.jornada = CFG_DEF.jornada;
+  } else if (onbPaso === 2){
+    const d = Number(v("#o-desc"));
+    if (isFinite(d) && d >= 0 && d <= 4) onbDatos.descansoDia = d;
   }
 }
 async function onbAccion(a){
@@ -1115,8 +1157,8 @@ async function onbAccion(a){
   }
   // Finalizar
   S.perfil = { nombre: onbDatos.nombre || "", empresa: onbDatos.empresa || "" };
-  ["baseNeto","jornada","tarifaSemana","tarifaSabado",
-   "finSemanaTodoExtra","finSemanaSoloEnteras","ausenciaCuentaJornada"].forEach(k => {
+  ["baseNeto","jornada","tarifaSemana","tarifaSabado","descansoDia",
+   "finSemanaTodoExtra","ausenciaCuentaJornada"].forEach(k => {
     if (onbDatos[k] !== undefined) S.config[k] = onbDatos[k];
   });
   S.onboarded = true;
@@ -1284,7 +1326,7 @@ function listaDias(fechas, titulo){
           ${raro ? `<span class="badge warn">revisar</span>`:""}</div>
         <div class="h">${num(c.horas)}h${
           c.extra>0 ? `<br><b>${num(c.extraPagada)}h extra · ${eur(c.importe)}</b>`:""}${
-          c.noComputada>0 ? `<br><span style="color:var(--warn)">${num(c.noComputada)}h sin computar</span>`:""}</div>
+          c.noComputada>0 ? `<br><span style="color:var(--warn)">${num(c.noComputada)}h de descanso</span>`:""}</div>
       </div>
       ${c.horasAus>0 ? `<div class="p"><span class="muted">${TIPOS[c.tipo].n}</span><span class="hh">${num(c.horasAus)}h</span></div>`:""}
       ${c.partes.map(p => `<div class="p"><span>${esc(p.obra)}</span><span class="hh">${num(p.horas)}h</span></div>`).join("")}
@@ -1410,11 +1452,12 @@ function vistaMes(){
 function vistaAjustes(){
   const c = S.config;
   const campos = [["baseNeto","Nómina base (€/mes)","0.01"],["jornada","Jornada ordinaria (h/día)","0.5"],
+                  ["descansoDia","Descanso descontado (h/día)","0.25"],
                   ["tarifaSemana","€ hora extra L-V","0.01"],["tarifaSabado","€ hora sáb/dom","0.01"]];
   const flags = [["finSemanaTodoExtra","Fin de semana: todas las horas son extra"],
-                 ["finSemanaSoloEnteras","Fin de semana: pagar solo horas completas"],
                  ["ausenciaCuentaJornada","Médico y permisos cuentan como jornada"]];
   const ej = calcDia(sabadoEjemplo(), {partes:[{obra:"x",horas:8.5}],tipo:"trabajo"}, c);
+  const ejL = calcDia(lunes(hoyISO()), {partes:[{obra:"x",horas:10.5}],tipo:"trabajo"}, c);
   return `
   <div class="card">
     <h2>Trabajador</h2>
@@ -1441,8 +1484,10 @@ function vistaAjustes(){
         <label class="small" style="flex:1;padding-right:10px">${l}</label>
         <button class="chip ${c[k]?"on":""}" style="flex:none" data-tog="${k}">${c[k]?"Sí":"No"}</button>
       </div>`).join("")}
-    <p class="tiny muted" style="margin:10px 0 0">Con tu configuración, un sábado de 8,5 h son
-      <b>${num(ej.extraPagada)} h</b> pagadas = <b>${eur(ej.importe)}</b>${ej.noComputada?`, y ${num(ej.noComputada)} h registradas sin computar`:""}.</p>
+    <p class="tiny muted" style="margin:10px 0 0">Con tu configuración:<br>
+      · Un <b>lunes de 10,5 h</b> → se pagan <b>${num(ejL.netas)} h</b>, de ellas <b>${num(ejL.extraPagada)} h extra</b> = ${eur(ejL.importe)}<br>
+      · Un <b>sábado de 8,5 h</b> → se pagan <b>${num(ej.netas)} h</b> a ${eur(c.tarifaSabado)} = <b>${eur(ej.importe)}</b><br>
+      El descanso de ${num(c.descansoDia)} h se descuenta de cada día trabajado, igual que hace tu empresa.</p>
   </div>
 
   <div class="card">
@@ -1686,12 +1731,14 @@ function descarga(nombre, contenido, tipo){
    ahí solo interesan las horas.
    ============================================================ */
 let expDesde = "", expHasta = "";
-const EXP = { importes:false, porObra:true, detalle:true };
+const EXP = { importes:false, porObra:true, detalle:true, descanso:true };
+/** Horas de un día tal y como deben salir en el informe */
+const horasInforme = c => EXP.descanso ? c.netas : c.horas;
 
 /** Agrega todo lo registrado entre dos fechas, ambas incluidas. */
 function datosRango(desde, hasta){
-  const r = { desde, hasta, dias:[], porObra:{}, horas:0, ordinarias:0, extra:0,
-              extraPagada:0, noComputada:0, importe:0, diasTrab:0, ausencias:{} };
+  const r = { desde, hasta, dias:[], porObra:{}, horas:0, netas:0, descanso:0, ordinarias:0,
+              extra:0, extraPagada:0, noComputada:0, importe:0, diasTrab:0, ausencias:{} };
   if (desde > hasta) return r;
   let f = desde, guardia = 0;
   while (f <= hasta && guardia++ < 4000){
@@ -1700,7 +1747,8 @@ function datosRango(desde, hasta){
       const c = calcDia(f, dd, S.config);
       if (c.horas > 0 || c.tipo !== "trabajo"){
         r.dias.push(c);
-        r.horas += c.horas; r.extra += c.extra; r.extraPagada += c.extraPagada;
+        r.horas += c.horas; r.netas += c.netas; r.descanso += c.descanso;
+        r.extra += c.extra; r.extraPagada += c.extraPagada;
         r.noComputada += c.noComputada; r.importe += c.importe;
         if (c.horas > 0) r.diasTrab++;
         if (c.tipo !== "trabajo") r.ausencias[c.tipo] = (r.ausencias[c.tipo]||0) + 1;
@@ -1714,7 +1762,8 @@ function datosRango(desde, hasta){
     f = addDias(f, 1);
   }
   r.ordinarias = redondea(r.horas - r.extra);
-  ["horas","ordinarias","extra","extraPagada","noComputada","importe"].forEach(k => r[k] = redondea(r[k]));
+  ["horas","netas","descanso","ordinarias","extra","extraPagada","noComputada","importe"]
+    .forEach(k => r[k] = redondea(r[k]));
   r.obras = Object.entries(r.porObra)
     .map(([n,o]) => ({ nombre:n, horas:o.horas, dias:o.dias.size }))
     .sort((a,b) => b.horas - a.horas);
@@ -1770,7 +1819,11 @@ function pintarExportar(){
       <b>${d.dias.length} jornada${d.dias.length===1?"":"s"}</b> · ${num(d.horas)} h</p>
 
     <div class="small" style="font-weight:600;margin-bottom:2px">Contenido</div>
-    ${[["importes","Incluir precios e importes",
+    ${[["descanso", `Descontar el descanso (${num(S.config.descansoDia)} h al día)`,
+        `El total de cada día sale ya con el descanso restado, que es como lo computa la empresa. ` +
+        `Un lunes de 8,5 h y un martes de 10,5 h salen como ${num(8.5 - S.config.descansoDia)} + ${num(10.5 - S.config.descansoDia)} = ` +
+        `<b>${num(19 - 2*S.config.descansoDia)} h</b>.`],
+       ["importes","Incluir precios e importes",
         "Desactivado, el informe solo muestra horas. Es lo habitual para mandarlo a la empresa."],
        ["porObra","Resumen por obra",
         "Una tabla con el total de horas dedicadas a cada obra."],
@@ -1981,6 +2034,8 @@ function libroHoras(d){
     const fin = addDias(lun, 6);
     filas.push([T(`${fmtCorta(lun)} - ${fmtCorta(fin)}`, S_TIT)]);
     if (S.perfil.nombre) filas.push([T(S.perfil.nombre, S_NEG)]);
+    if (EXP.descanso)
+      filas.push([T(`Total = horas trabajadas menos ${num(S.config.descansoDia)} h de descanso`, S_GRIS)]);
     filas.push([]);
 
     dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
@@ -1991,7 +2046,7 @@ function libroHoras(d){
         filas.push([
           T(p.obra, S_FILA),
           T(p.horas, S_FILA, true),
-          i === 0 ? T(c.horas, S_TOT, true) : T("", S_TOT)
+          i === 0 ? T(horasInforme(c), S_TOT, true) : T("", S_TOT)
         ]);
       });
       // Espacio en blanco entre días, como en la hoja original
@@ -1999,7 +2054,7 @@ function libroHoras(d){
       filas.push([]);
     });
 
-    const totSem = redondea(dias.reduce((s,c) => s + c.horas, 0));
+    const totSem = redondea(dias.reduce((s,c) => s + horasInforme(c), 0));
     filas.push([ T("TOTAL SEMANA", S_CAB), T("", S_CAB), T(totSem, S_CAB, true) ]);
 
     const nom = `${fmtCorta(lun)}-${fmtCorta(fin)}`.replace(/[\\\/\?\*\[\]:]/g,"");
@@ -2055,10 +2110,15 @@ function exportarCSV(){
 
   F.push(["RESUMEN"]);
   F.push(["Días trabajados", d.diasTrab]);
-  F.push(["Horas totales", num(d.horas)]);
+  if (EXP.descanso){
+    F.push(["Horas trabajadas", num(d.horas)]);
+    F.push([`Descanso descontado (${num(S.config.descansoDia)} h/día)`, "-" + num(d.descanso)]);
+    F.push(["HORAS A COMPUTAR", num(d.netas)]);
+  } else {
+    F.push(["Horas totales", num(d.horas)]);
+  }
   F.push(["Horas ordinarias", num(d.ordinarias)]);
   F.push(["Horas extra", num(d.extraPagada)]);
-  if (d.noComputada > 0) F.push(["Horas no computadas", num(d.noComputada)]);
   if (EXP.importes) F.push(["Importe de las horas extra", num(d.importe)]);
   Object.entries(d.ausencias).forEach(([k,v]) => F.push([TIPOS[k].n, v + (v===1?" día":" días")]));
   F.push([]);
@@ -2073,19 +2133,26 @@ function exportarCSV(){
 
   if (EXP.detalle){
     F.push(["DETALLE POR JORNADA"]);
-    const cab = ["Fecha","Día","Tipo","Obra","Horas","Total del día","Horas extra"];
+    const cab = ["Fecha","Día","Tipo","Obra","Horas"];
+    if (EXP.descanso) cab.push("Trabajadas","Descanso","Total a computar");
+    else cab.push("Total del día");
+    cab.push("Horas extra");
     if (EXP.importes) cab.push("Importe extra");
-    cab.push("No computadas","Nota");
+    cab.push("Nota");
     F.push(cab);
     d.dias.forEach(c => {
       const nota = (S.dias[c.fecha]||{}).nota || "";
       const filas = c.partes.length ? c.partes : [null];
       filas.forEach((p,i) => {
         const f = [c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n,
-                   p ? p.obra : "", p ? num(p.horas) : "",
-                   i===0 ? num(c.horas) : "", i===0 ? num(c.extraPagada) : ""];
+                   p ? p.obra : "", p ? num(p.horas) : ""];
+        if (EXP.descanso)
+          f.push(i===0 ? num(c.horas) : "", i===0 && c.descanso ? "-" + num(c.descanso) : "",
+                 i===0 ? num(c.netas) : "");
+        else f.push(i===0 ? num(c.horas) : "");
+        f.push(i===0 ? num(c.extraPagada) : "");
         if (EXP.importes) f.push(i===0 ? num(c.importe) : "");
-        f.push(i===0 && c.noComputada ? num(c.noComputada) : "", i===0 ? nota : "");
+        f.push(i===0 ? nota : "");
         F.push(f);
       });
     });
@@ -2125,7 +2192,8 @@ const PDF = (() => {
 
   /* Unicode → WinAnsi (CP1252). El castellano cabe entero en Latin-1. */
   const ESPECIAL = { 0x20AC:0x80, 0x201A:0x82, 0x2026:0x85, 0x2018:0x91, 0x2019:0x92,
-                     0x201C:0x93, 0x201D:0x94, 0x2022:0x95, 0x2013:0x96, 0x2014:0x97 };
+                     0x201C:0x93, 0x201D:0x94, 0x2022:0x95, 0x2013:0x96, 0x2014:0x97,
+                     0x2212:0x2D, 0x00A0:0x20, 0x2010:0x2D, 0x2011:0x2D };
   function winAnsi(s){
     let o = "";
     for (const ch of String(s)){
@@ -2238,13 +2306,16 @@ function pdfInforme(d){
   p.y -= 20;
 
   // --- Resumen ---
-  const filas = [
-    ["Días trabajados", String(d.diasTrab)],
-    ["Horas totales", num(d.horas) + " h"],
-    ["De ellas, ordinarias", num(d.ordinarias) + " h"],
-    ["Horas extra", num(d.extraPagada) + " h"]
-  ];
-  if (d.noComputada > 0) filas.push(["Horas no computadas", num(d.noComputada) + " h"]);
+  const filas = [["Días trabajados", String(d.diasTrab)]];
+  if (EXP.descanso){
+    filas.push(["Horas trabajadas", num(d.horas) + " h"]);
+    filas.push([`Descanso descontado (${num(S.config.descansoDia)} h × ${d.diasTrab} días)`, "− " + num(d.descanso) + " h"]);
+    filas.push(["HORAS A COMPUTAR", num(d.netas) + " h"]);
+  } else {
+    filas.push(["Horas totales", num(d.horas) + " h"]);
+  }
+  filas.push(["De ellas, ordinarias", num(d.ordinarias) + " h"]);
+  filas.push(["Horas extra", num(d.extraPagada) + " h"]);
   if (EXP.importes) filas.push(["Importe de las horas extra", eur(d.importe)]);
   Object.entries(d.ausencias).forEach(([k,v]) => filas.push([TIPOS[k].n, v + (v===1?" día":" días")]));
 
@@ -2325,7 +2396,7 @@ function pdfInforme(d){
 
           // Casilla del total: una sola, tan alta como las filas del día
           p.rect(bx + cObra + cHoras, by - FILA*partes.length + 4, cTotal, FILA*partes.length, VERDE);
-          p.texto(num(c.horas), bx + cObra + cHoras + cTotal/2, by - 6, 8.5, { al:"centro", negrita:true, color:TINTA });
+          p.texto(num(horasInforme(c)), bx + cObra + cHoras + cTotal/2, by - 6, 8.5, { al:"centro", negrita:true, color:TINTA });
 
           partes.forEach(pa => {
             p.rect(bx, by - FILA + 4, cObra + cHoras, FILA, CLARO);
@@ -2343,7 +2414,7 @@ function pdfInforme(d){
       }
 
       // Total de la semana
-      const tot = redondea(dias.reduce((s,c) => s + c.horas, 0));
+      const tot = redondea(dias.reduce((s,c) => s + horasInforme(c), 0));
       p.sitio(24);
       p.rect(X, p.y - FILA + 4, BW, FILA, AZUL);
       p.texto("Total semana", X + 5, p.y - 6, 8.5, { negrita:true, color:"#FFFFFF" });
@@ -2356,7 +2427,8 @@ function pdfInforme(d){
   p.sitio(30);
   p.linea(X, p.y + 4, dcha, p.y + 4, "#ded7c8", 0.5);
   p.texto(`Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}` +
-          (EXP.importes ? "" : " · Informe de horas, sin importes económicos"),
+          (EXP.descanso ? ` · Los totales llevan descontadas ${num(S.config.descansoDia)} h de descanso por día` : "") +
+          (EXP.importes ? "" : " · Sin importes económicos"),
           X + ANCHO_UTIL/2, p.y - 8, 8, { al:"centro", color:"#8a8177" });
 
   return p.blob();
@@ -2430,10 +2502,13 @@ function verInforme(){
 
     <table class="resumen"><tbody>
       <tr><td>Días trabajados</td>${td("<b>"+d.diasTrab+"</b>",1)}</tr>
-      <tr><td>Horas totales</td>${td("<b>"+num(d.horas)+" h</b>",1)}</tr>
+      ${EXP.descanso ? `
+        <tr><td>Horas trabajadas</td>${td(num(d.horas)+" h",1)}</tr>
+        <tr><td>Descanso descontado <span style="color:#8a8177">${num(S.config.descansoDia)} h × ${d.diasTrab} días</span></td>${td("&minus; "+num(d.descanso)+" h",1)}</tr>
+        <tr class="destaca"><td><b>Horas a computar</b></td>${td("<b>"+num(d.netas)+" h</b>",1)}</tr>`
+      : `<tr><td>Horas totales</td>${td("<b>"+num(d.horas)+" h</b>",1)}</tr>`}
       <tr><td>De ellas, ordinarias</td>${td(num(d.ordinarias)+" h",1)}</tr>
       <tr><td>Horas extra</td>${td("<b>"+num(d.extraPagada)+" h</b>",1)}</tr>
-      ${d.noComputada>0 ? `<tr><td>Horas no computadas</td>${td(num(d.noComputada)+" h",1)}</tr>`:""}
       ${EXP.importes ? `<tr class="destaca"><td>Importe de las horas extra</td>${td("<b>"+eur(d.importe)+"</b>",1)}</tr>`:""}
       ${Object.entries(d.ausencias).map(([k,v]) =>
         `<tr><td>${TIPOS[k].n}</td>${td(v+(v===1?" día":" días"),1)}</tr>`).join("")}
@@ -2465,11 +2540,11 @@ function verInforme(){
           ${partes.map((p,i) => `<tr>
             <td class="obra">${esc(p.obra)}</td>
             <td class="h">${num(p.horas)}</td>
-            ${i===0 ? `<td class="tot" rowspan="${partes.length}">${num(c.horas)}</td>` : ""}
+            ${i===0 ? `<td class="tot" rowspan="${partes.length}">${num(horasInforme(c))}</td>` : ""}
           </tr>`).join("")}
         </tbody></table>`;
       });
-      const tot = redondea(dias.reduce((s,c)=>s+c.horas,0));
+      const tot = redondea(dias.reduce((s,c)=>s+horasInforme(c),0));
       html += `</div><table class="excelito totalsem"><tbody><tr class="cab">
         <td>Total semana</td><td></td><td>${num(tot)}</td></tr></tbody></table>`;
     }
@@ -2493,7 +2568,8 @@ function verInforme(){
   }
 
   html += `<div class="pie">Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}${
-    EXP.importes ? "" : " · Informe de horas, sin importes económicos"}</div></div>`;
+    EXP.descanso ? ` · Los totales llevan descontadas ${num(S.config.descansoDia)} h de descanso por día` : ""}${
+    EXP.importes ? "" : " · Sin importes económicos"}</div></div>`;
 
   $("#informe").innerHTML = `
     <div class="barra-inf no-print">
