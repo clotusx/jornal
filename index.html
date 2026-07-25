@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Jornal</title>
+<meta name="description" content="Registro de jornadas, horas extra y sueldo. Funciona sin conexión y sin cuentas.">
+<meta name="theme-color" content="#2A2823">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Jornal">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{
+  --bg:#F5F1E8; --ink:#2A2823; --accent:#B5602F; --muted:#8A6A4A;
+  --line:#E4DDC9; --panel:#FFFFFF; --band:#EFE8D6; --ok:#4A7C59; --warn:#C25E3A;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+  --serif:ui-serif,Georgia,"Times New Roman",serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  /* Márgenes seguros del dispositivo: notch, isla dinámica, barra de gestos
+     de iOS y barra de navegación de Android. Con fallback a 0 donde no existan. */
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-l:env(safe-area-inset-left,0px);
+  --safe-r:env(safe-area-inset-right,0px);
+  /* Alto real de la barra inferior, para que nunca tape contenido */
+  --nav-h:60px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;
+  line-height:1.45;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer}
+input,select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:10px;
+  padding:11px 12px;width:100%;appearance:none;font-size:16px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.serif{font-family:var(--serif)}
+
+/* Splash */
+#splash{position:fixed;inset:0;z-index:9999;background:var(--ink);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .45s ease}
+#splash.out{opacity:0;pointer-events:none}
+#splash svg{width:96px;height:96px;overflow:visible}
+#sp-cord{stroke:#F5F1E8;stroke-width:2.2;stroke-linecap:round;stroke-dasharray:30;
+  stroke-dashoffset:30;animation:cord .5s ease-out .1s forwards}
+#sp-anchor{fill:#F5F1E8;opacity:0;animation:fade .3s ease-out forwards}
+#sp-bob{fill:#B5602F;transform-origin:50px 12px;opacity:0;
+  animation:drop .45s cubic-bezier(.34,1.4,.64,1) .5s forwards, swing 1.5s ease-out .95s}
+#sp-name{font-family:var(--serif);font-size:30px;letter-spacing:.22em;color:#F5F1E8;
+  text-indent:.22em;opacity:0;animation:fade .6s ease-out .85s forwards}
+#sp-tag{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#B5602F;opacity:0;
+  animation:fade .6s ease-out 1.05s forwards}
+@keyframes cord{to{stroke-dashoffset:0}}
+@keyframes fade{to{opacity:1}}
+@keyframes drop{from{opacity:0;transform:translateY(-16px) scale(.9)}to{opacity:1;transform:none}}
+@keyframes swing{0%{transform:rotate(0)}25%{transform:rotate(4.5deg)}55%{transform:rotate(-2.5deg)}
+  80%{transform:rotate(1deg)}100%{transform:rotate(0)}}
+#splash.fast *{animation-delay:0s!important;animation-duration:.18s!important}
+#splash.fast #sp-cord{stroke-dashoffset:0}
+@media(prefers-reduced-motion:reduce){
+  #splash *{animation-duration:.01s!important;animation-delay:0s!important;opacity:1}
+  #sp-cord{stroke-dashoffset:0}
+}
+
+/* Layout */
+#app{max-width:480px;margin:0 auto;
+  padding-top:calc(14px + var(--safe-t));
+  padding-left:calc(14px + var(--safe-l));
+  padding-right:calc(14px + var(--safe-r));
+  /* Hueco inferior = barra de la app + barra de gestos del móvil + aire */
+  padding-bottom:calc(var(--nav-h) + var(--safe-b) + 28px)}
+header.top{display:flex;align-items:center;gap:9px;margin-bottom:14px}
+header.top svg{width:26px;height:26px;flex:none}
+header.top h1{font-family:var(--serif);font-size:19px;letter-spacing:.16em;text-indent:.16em;
+  margin:0;font-weight:600;flex:1}
+header.top .quien{font-size:11px;color:var(--muted);text-align:right;line-height:1.2;max-width:38%}
+h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 8px;font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.row{display:flex;align-items:center;gap:8px}
+.between{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.muted{color:var(--muted)} .small{font-size:13px} .tiny{font-size:11.5px}
+
+.hero{background:var(--ink);color:var(--bg);border-radius:16px;padding:18px;margin-bottom:14px;
+  position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-30px;top:-30px;width:120px;height:120px;
+  border-radius:50%;border:5px solid rgba(181,96,47,.28)}
+.hero .lbl{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:rgba(245,241,232,.6);margin-bottom:2px}
+.hero .big{font-family:var(--mono);font-size:34px;font-weight:600;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;margin-bottom:12px;line-height:1.1}
+.hero .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;position:relative;z-index:1}
+.hero .grid div{font-size:11px;color:rgba(245,241,232,.65)}
+.hero .grid b{display:block;font-family:var(--mono);font-size:15px;font-weight:600;
+  color:var(--bg);font-variant-numeric:tabular-nums}
+
+.btn{display:flex;align-items:center;justify-content:center;gap:7px;background:var(--accent);
+  color:#fff;border-radius:11px;padding:13px;font-size:15px;font-weight:600;width:100%;
+  transition:transform .1s}
+.btn:active{transform:scale(.98)}
+.btn.sec{background:var(--band);color:var(--ink)}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--muted);font-weight:500;
+  font-size:14px;padding:11px}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.link{color:var(--muted);font-size:13px;text-decoration:underline;text-underline-offset:3px}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chip{background:var(--band);border:1px solid var(--line);border-radius:999px;padding:6px 12px;
+  font-size:13px;font-family:var(--mono);white-space:nowrap}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+.parte{display:flex;gap:7px;align-items:center;margin-bottom:7px}
+.parte input[type=text]{flex:1;min-width:0}
+.parte input[type=number]{width:78px;flex:none;text-align:right;font-family:var(--mono)}
+.parte .del{flex:none;width:34px;height:40px;display:grid;place-items:center;color:var(--accent);opacity:.6}
+
+/* Menú deslizable: si no caben todas las opciones se arrastra con el dedo.
+   Las sombras laterales aparecen SOLO cuando queda contenido por ver. */
+.seg{display:flex;border-radius:11px;padding:3px;gap:3px;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  scroll-snap-type:x proximity;overscroll-behavior-x:contain;
+  background:
+    linear-gradient(90deg,var(--band) 40%,rgba(239,232,214,0)) left center/26px 100% no-repeat local,
+    linear-gradient(270deg,var(--band) 40%,rgba(239,232,214,0)) right center/26px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%,rgba(42,40,35,.22),transparent) left center/14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%,rgba(42,40,35,.22),transparent) right center/14px 100% no-repeat scroll,
+    var(--band)}
+.seg::-webkit-scrollbar{display:none}
+.seg button{flex:0 0 auto;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:500;
+  white-space:nowrap;color:var(--muted);scroll-snap-align:center}
+.seg button.on{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+
+.dia{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:9px;background:var(--panel)}
+.dia .cab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:9px 12px;background:var(--band)}
+.dia .cab .d{font-size:14px;font-weight:600;text-transform:capitalize}
+.dia .cab .f{font-size:11px;color:var(--muted);font-family:var(--mono);font-weight:400}
+.dia .cab .h{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;flex:none}
+.dia .cab .h b{color:var(--accent)}
+.dia .p{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;
+  font-size:14px;border-top:1px solid #F2EDE0}
+.dia .p .hh{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.badge{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 7px;border-radius:999px;background:var(--band);color:var(--muted);font-weight:600;vertical-align:middle}
+.badge.aus{background:#E8E2F0;color:#5B4A7C}
+.badge.warn{background:#F7E0D6;color:var(--warn)}
+
+.delta{font-family:var(--mono);font-size:13px;font-weight:600}
+.delta.up{color:var(--ok)} .delta.down{color:var(--warn)} .delta.same{color:var(--muted)}
+.chart{width:100%;height:150px;display:block}
+.chart text{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+.stat{display:flex;justify-content:space-between;gap:10px;padding:9px 0;
+  border-bottom:1px solid #F2EDE0;font-size:14px}
+.stat:last-child{border:0}
+.stat b{font-family:var(--mono);font-weight:600;white-space:nowrap}
+.stat.tot{border-top:2px solid var(--ink);border-bottom:0;margin-top:4px;padding-top:11px;
+  font-weight:600;font-size:15px}
+
+nav{position:fixed;bottom:0;left:0;right:0;z-index:50;background:rgba(245,241,232,.94);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);
+  padding-bottom:var(--safe-b);padding-left:var(--safe-l);padding-right:var(--safe-r)}
+nav .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+nav button{min-height:var(--nav-h);padding:9px 4px 8px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:3px;font-size:10.5px;color:var(--muted);font-weight:500}
+nav button.on{color:var(--accent);font-weight:600}
+nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+
+#toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + var(--safe-b) + 22px);
+  transform:translateX(-50%) translateY(12px);
+  background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:11px;font-size:14px;z-index:400;
+  opacity:0;pointer-events:none;transition:.25s;max-width:88vw;text-align:center}
+#toast.on{opacity:1;transform:translateX(-50%)}
+
+.sheet{position:fixed;inset:0;z-index:300;display:none}
+.sheet.on{display:block}
+.sheet .bg{position:absolute;inset:0;background:rgba(42,40,35,.45)}
+.sheet .pan{position:absolute;left:0;right:0;bottom:0;background:var(--bg);border-radius:18px 18px 0 0;
+  padding:18px calc(16px + var(--safe-r)) calc(20px + var(--safe-b)) calc(16px + var(--safe-l));
+  max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  max-width:480px;margin:0 auto}
+.sheet .grab{width:38px;height:4px;background:var(--line);border-radius:2px;margin:0 auto 14px}
+
+/* Pop-up de confirmación (propio: idéntico en iOS y Android, y el navegador no lo bloquea) */
+#modal{position:fixed;inset:0;z-index:500;display:none;align-items:center;justify-content:center;
+  padding:calc(20px + var(--safe-t)) calc(20px + var(--safe-r)) calc(20px + var(--safe-b)) calc(20px + var(--safe-l))}
+#modal.on{display:flex}
+#modal .bg{position:absolute;inset:0;background:rgba(42,40,35,.55);backdrop-filter:blur(2px)}
+#modal .box{position:relative;background:var(--bg);border-radius:16px;padding:20px;
+  width:100%;max-width:340px;box-shadow:0 18px 50px rgba(0,0,0,.3);
+  animation:pop .18s cubic-bezier(.2,1.2,.5,1)}
+@keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+#modal h3{margin:0 0 7px;font-size:17px;font-weight:700}
+#modal p{margin:0 0 18px;font-size:14px;color:var(--muted);line-height:1.4}
+#modal .acciones{display:grid;gap:8px}
+#modal .peligro{background:var(--warn)}
+@media(prefers-reduced-motion:reduce){#modal .box{animation:none}}
+
+/* Avisos */
+.aviso{display:flex;gap:10px;align-items:flex-start;border-radius:12px;padding:12px;
+  margin-bottom:12px;font-size:13.5px;line-height:1.35}
+.aviso.info{background:#EAF0EA;border:1px solid #CBDCCB;color:#33512F}
+.aviso.err{background:#F9E4DA;border:1px solid #EEC3AF;color:#8C3A1B}
+.aviso b{display:block;margin-bottom:2px}
+.aviso button{flex:none;align-self:center}
+
+/* Onboarding */
+#onb{max-width:480px;margin:0 auto;
+  padding-top:calc(24px + var(--safe-t));
+  padding-left:calc(18px + var(--safe-l));
+  padding-right:calc(18px + var(--safe-r));
+  padding-bottom:calc(28px + var(--safe-b))}
+#onb .paso{margin-bottom:16px}
+#onb label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
+#onb .ayuda{font-size:12px;color:var(--muted);margin:-2px 0 7px;font-weight:400;line-height:1.35}
+#onb .grupo{margin-bottom:15px}
+.pasos{display:flex;gap:5px;margin-bottom:20px}
+.pasos i{height:3px;flex:1;background:var(--line);border-radius:2px}
+.pasos i.on{background:var(--accent)}
+
+.hide{display:none!important}
+@media print{
+  nav,#splash,.no-print{display:none!important}
+  body{background:#fff}
+  #app{max-width:none;padding:0}
+  .card{break-inside:avoid;border-color:#ccc}
+  .hero{background:#fff;color:#000;border:2px solid #000}
+  .hero .lbl,.hero .grid div{color:#444}
+  .hero .grid b{color:#000}
+  .hero::after{display:none}
+}
+</style>
+</head>
+<body>
+
+<div id="splash">
+  <svg viewBox="0 0 100 100" aria-hidden="true">
+    <line id="sp-cord" x1="50" y1="12" x2="50" y2="38"/>
+    <circle id="sp-anchor" cx="50" cy="10" r="4"/>
+    <path id="sp-bob" d="M50 34.5 L61.8 49.5 L59.8 60.5 L50 90.5 L40.2 60.5 L38.2 49.5 Z"/>
+  </svg>
+  <div id="sp-name">JORNAL</div>
+  <div id="sp-tag">Tus horas, tu dinero</div>
+</div>
+
+<div id="onb" class="hide"></div>
+
+<div id="app" class="hide">
+  <header class="top">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <line x1="50" y1="12" x2="50" y2="38" stroke="#2A2823" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="50" cy="10" r="5" fill="#2A2823"/>
+      <path d="M50 34.5 L61.8 49.5 L59.8 60.5 L50 90.5 L40.2 60.5 L38.2 49.5 Z" fill="#B5602F"/>
+    </svg>
+    <h1>JORNAL</h1>
+    <div class="quien" id="quien"></div>
+  </header>
+  <div id="avisos"></div>
+  <main id="view"></main>
+</div>
+
+<nav class="hide" id="nav">
+  <div class="in">
+    <button data-t="hoy"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Registrar</button>
+    <button data-t="semana"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>Semana</button>
+    <button data-t="mes"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Mes</button>
+    <button data-t="ajustes"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></svg>Ajustes</button>
+  </div>
+</nav>
+
+<div id="toast"></div>
+<div class="sheet" id="sheet"><div class="bg" data-cerrar></div><div class="pan"><div class="grab"></div><div id="sheetBody"></div></div></div>
+
+<div id="modal" role="dialog" aria-modal="true" aria-labelledby="mTit">
+  <div class="bg" id="mBg"></div>
+  <div class="box">
+    <h3 id="mTit"></h3>
+    <p id="mTxt"></p>
+    <div class="acciones">
+      <button class="btn" id="mSi"></button>
+      <button class="btn sec" id="mNo">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<noscript><div style="padding:24px;font-family:sans-serif">Jornal necesita JavaScript activado.</div></noscript>
+
+<script>
+"use strict";
+/* ============================================================
+   JORNAL v1.1.0 — registro de horas, extras y sueldo
+   · Sin dependencias externas, sin cuentas, sin servidor.
+   · Los datos de cada persona viven solo en su propio móvil.
+   ============================================================ */
+
+const APP_VER = "1.2.0";
+const EMAIL_SOPORTE = "clotusx@gmail.com";
+
+/* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
+   arriba del todo cada vez que publiques cambios. */
+const NOVEDADES = {
+  "1.2.0": [
+    "Botón de actualización: las mejoras llegan con un solo toque y sin perder ni un dato.",
+    "Antes de cada actualización se guarda automáticamente una copia en tu móvil.",
+    "Aviso para instalar Jornal en la pantalla de inicio, con los pasos de tu teléfono.",
+    "Confirmación antes de borrar o modificar cualquier jornada ya guardada.",
+    "La app respeta los bordes y botones del móvil: ya nada queda tapado."
+  ],
+  "1.1.0": [
+    "Configuración inicial: cada persona mete su nómina y sus tarifas.",
+    "Copias de seguridad automáticas dentro del móvil cada 7 días.",
+    "Aviso de fallos con envío de informe al desarrollador."
+  ]
+};
+
+const DIAS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+const DIAS_C = ["D","L","M","X","J","V","S"];
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio",
+               "agosto","septiembre","octubre","noviembre","diciembre"];
+const TIPOS = {
+  trabajo:{n:"Trabajo"}, medico:{n:"Médico"}, permiso:{n:"Permiso"},
+  vacaciones:{n:"Vacaciones"}, baja:{n:"Baja"}, festivo:{n:"Festivo"}
+};
+const CFG_DEF = {
+  baseNeto:1400, jornada:8.5, tarifaSemana:10, tarifaSabado:13,
+  finSemanaTodoExtra:true, finSemanaSoloEnteras:true, ausenciaCuentaJornada:true
+};
+
+/* ---------- Fechas, sin desfase de zona horaria ---------- */
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const parse = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y,m-1,d); };
+const hoyISO = () => iso(new Date());
+const dow = s => parse(s).getDay();
+const esFinde = s => { const w = dow(s); return w===6 || w===0; };
+function addDias(s,n){ const d = parse(s); d.setDate(d.getDate()+n); return iso(d); }
+function lunes(s){ const d = parse(s); d.setDate(d.getDate() - ((d.getDay()+6)%7)); return iso(d); }
+const mesDe = s => s.slice(0,7);
+function fmtCorta(s){ const d = parse(s); return `${d.getDate()} ${MESES[d.getMonth()].slice(0,3)}`; }
+function fmtLarga(s){ const d = parse(s); return `${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`; }
+const diasEntre = (a,b) => Math.round((parse(b)-parse(a))/86400000);
+
+/* ---------- Formato ---------- */
+const redondea = n => Math.round(n*100)/100;
+const eur = n => (isFinite(n)?n:0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+const num = n => (redondea(isFinite(n)?n:0)).toLocaleString("es-ES",{maximumFractionDigits:2});
+
+/* ============================================================
+   Registro de errores  →  informe por correo
+   ============================================================ */
+let ERRORES = [];
+function apuntarError(origen, err, extra){
+  try{
+    const e = {
+      cuando: new Date().toISOString(), origen,
+      msg: String((err && (err.message || err.reason || err)) || "desconocido").slice(0,400),
+      stack: String((err && err.stack) || "").split("\n").slice(0,6).join("\n").slice(0,900),
+      extra: extra ? String(extra).slice(0,200) : ""
+    };
+    ERRORES.push(e);
+    if (ERRORES.length > 20) ERRORES.shift();
+    try { localStorage.setItem("jornal:errores", JSON.stringify(ERRORES)); } catch(_){}
+    mostrarAvisoError();
+  } catch(_){}
+}
+window.addEventListener("error", ev => {
+  apuntarError("error", ev.error || ev, `${ev.filename||""}:${ev.lineno||""}`);
+  soltarSplash();
+});
+window.addEventListener("unhandledrejection", ev => apuntarError("promesa", ev.reason));
+
+/** Diagnóstico técnico. NO incluye jornadas, obras ni importes: solo el fallo. */
+function informeTexto(){
+  const l = [
+    "--- Informe de fallo de Jornal ---",
+    "Versión app: " + APP_VER,
+    "Fecha: " + new Date().toLocaleString("es-ES"),
+    "Navegador: " + navigator.userAgent,
+    "Idioma: " + navigator.language,
+    "Pantalla: " + screen.width + "x" + screen.height + " @" + (window.devicePixelRatio||1),
+    "Instalada como app: " + (matchMedia("(display-mode: standalone)").matches || navigator.standalone ? "sí" : "no"),
+    "Conexión: " + (navigator.onLine ? "sí" : "no"),
+    "Jornadas guardadas: " + (S ? Object.keys(S.dias).length : "?"),
+    "Almacén en uso: " + ALMACEN,
+    "", "Fallos registrados (" + ERRORES.length + "):"
+  ];
+  if (!ERRORES.length) l.push("(ninguno — informe enviado manualmente)");
+  ERRORES.slice(-6).forEach((e,i) => {
+    l.push(`\n[${i+1}] ${e.cuando} · ${e.origen}`, e.msg, e.extra ? "en " + e.extra : "", e.stack);
+  });
+  l.push("", "--- Describe aquí qué estabas haciendo cuando falló ---", "");
+  return l.filter(x => x !== "").join("\n");
+}
+function enviarInforme(){
+  const cuerpo = informeTexto();
+  const url = "mailto:" + EMAIL_SOPORTE +
+    "?subject=" + encodeURIComponent("Fallo en Jornal v" + APP_VER) +
+    "&body=" + encodeURIComponent(cuerpo.slice(0,1800));
+  location.href = url;
+  setTimeout(() => toast("Si no se abre el correo, usa «Copiar informe»"), 1800);
+}
+async function copiarInforme(){
+  const t = informeTexto();
+  try { await navigator.clipboard.writeText(t); toast("Informe copiado al portapapeles"); }
+  catch(e){
+    abrirSheet(`<h2>Informe de fallo</h2>
+      <p class="small muted">Copia este texto y envíalo a ${EMAIL_SOPORTE}</p>
+      <textarea rows="14" class="mono" style="font-size:11px" readonly>${esc(t)}</textarea>
+      <button class="btn sec" style="margin-top:12px" data-cerrar>Cerrar</button>`);
+  }
+}
+async function limpiarErrores(){
+  const ok = await confirmar("¿Vaciar el registro de fallos?",
+    `Se borrarán las ${ERRORES.length} incidencias guardadas. Envía antes el informe si quieres que se revisen.`,
+    "Sí, vaciar", true);
+  if (!ok) return;
+  ERRORES = [];
+  try { localStorage.removeItem("jornal:errores"); } catch(_){}
+  mostrarAvisoError(); render(); toast("Registro de fallos vaciado");
+}
+
+/* ============================================================
+   Almacenamiento: IndexedDB + espejo en localStorage
+   ============================================================ */
+const DB_NAME="jornal", STORE="kv", KEY="estado", KEY_SNAP="snapshots", LS_KEY="jornal:estado";
+let _db = null, ALMACEN = "iniciando";
+
+function abrirDB(){
+  return new Promise(res => {
+    if (_db) return res(_db);
+    let req;
+    try { req = indexedDB.open(DB_NAME,1); }
+    catch(e){ apuntarError("idb-open", e); return res(null); }
+    let hecho = false;
+    const fin = v => { if (!hecho){ hecho = true; res(v); } };
+    req.onupgradeneeded = () => { try{ req.result.createObjectStore(STORE); }catch(e){ apuntarError("idb-upgrade", e); } };
+    req.onsuccess = () => { _db = req.result;
+      _db.onversionchange = () => { try{ _db.close(); }catch(_){} _db = null; };
+      fin(_db); };
+    req.onerror = () => { apuntarError("idb-open", req.error); fin(null); };
+    req.onblocked = () => fin(null);
+    setTimeout(() => fin(_db), 3000);   // el arranque nunca se queda colgado
+  });
+}
+function idbGet(k){
+  return abrirDB().then(db => db ? new Promise((res,rej) => {
+    const r = db.transaction(STORE,"readonly").objectStore(STORE).get(k);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }) : null);
+}
+function idbPut(k,v){
+  return abrirDB().then(db => db ? new Promise((res,rej) => {
+    const tx = db.transaction(STORE,"readwrite");
+    tx.objectStore(STORE).put(v,k);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+  }) : null);
+}
+async function leerDisco(){
+  try{
+    const v = await idbGet(KEY);
+    if (v){ ALMACEN = "IndexedDB"; return typeof v === "string" ? JSON.parse(v) : v; }
+  } catch(e){ apuntarError("leer-idb", e); }
+  try{
+    const t = localStorage.getItem(LS_KEY);
+    if (t){ ALMACEN = "localStorage"; return JSON.parse(t); }
+  } catch(e){ apuntarError("leer-ls", e); }
+  return null;
+}
+/* Cola de escritura: evita que dos guardados simultáneos se pisen */
+let _cola = Promise.resolve();
+function escribirDisco(estado){
+  _cola = _cola.then(async () => {
+    const txt = JSON.stringify(estado);
+    let ok = false;
+    try { localStorage.setItem(LS_KEY, txt); ok = true; ALMACEN = "localStorage"; }
+    catch(e){ apuntarError("guardar-ls", e, "posible cuota llena"); }
+    try { await idbPut(KEY, txt); ok = true; ALMACEN = "IndexedDB"; }
+    catch(e){ apuntarError("guardar-idb", e); }
+    if (!ok) toast("⚠ No se han podido guardar los datos. Descarga una copia.");
+  }).catch(e => apuntarError("cola", e));
+  return _cola;
+}
+
+/* ---------- Copias automáticas semanales (dentro del propio móvil) ---------- */
+const MAX_SNAP = 8;
+/** Guarda una copia ahora mismo, pase lo que pase. Devuelve true si lo logra. */
+async function snapshotAhora(motivo){
+  try{
+    let snaps = (await idbGet(KEY_SNAP)) || [];
+    if (typeof snaps === "string") snaps = JSON.parse(snaps);
+    snaps.push({ fecha: hoyISO(), cuando: new Date().toISOString(),
+                 ver: APP_VER, motivo: motivo || "semanal", datos: JSON.stringify(S) });
+    while (snaps.length > MAX_SNAP) snaps.shift();
+    await idbPut(KEY_SNAP, snaps);
+    return true;
+  } catch(e){ apuntarError("snapshot", e); return false; }
+}
+/** Copia rutinaria: solo si han pasado 7 días desde la última. */
+async function snapshotSemanal(){
+  try{
+    let snaps = (await idbGet(KEY_SNAP)) || [];
+    if (typeof snaps === "string") snaps = JSON.parse(snaps);
+    const ult = snaps.length ? snaps[snaps.length-1].fecha : null;
+    if (ult && diasEntre(ult, hoyISO()) < 7) return;
+    await snapshotAhora("semanal");
+  } catch(e){ apuntarError("snapshot-semanal", e); }
+}
+async function listarSnapshots(){
+  try{
+    let s = (await idbGet(KEY_SNAP)) || [];
+    if (typeof s === "string") s = JSON.parse(s);
+    return s;
+  } catch(e){ apuntarError("listar-snap", e); return []; }
+}
+
+/* ============================================================
+   Estado
+   ============================================================ */
+let S = null, tab = "hoy";
+let cacheSem = new Map(), cacheMes = new Map(), _ordenadas = null;
+
+function estadoNuevo(){
+  return { version:2, config:{...CFG_DEF}, perfil:{nombre:"",empresa:""},
+           dias:{}, obras:[], nominas:{}, creado:hoyISO(), onboarded:false };
+}
+function invalidar(fecha){
+  _ordenadas = null;
+  if (fecha){ cacheSem.delete(lunes(fecha)); cacheMes.delete(mesDe(fecha)); }
+  else { cacheSem.clear(); cacheMes.clear(); }
+}
+/** Fechas registradas, de más reciente a más antigua. Se calcula una vez y se cachea. */
+function fechasOrdenadas(){
+  if (!_ordenadas) _ordenadas = Object.keys(S.dias).sort().reverse();
+  return _ordenadas;
+}
+async function guardar(fecha){
+  invalidar(fecha);
+  S.guardado = new Date().toISOString();
+  await escribirDisco(S);
+}
+
+/* ============================================================
+   Motor de cálculo
+   ============================================================ */
+function calcDia(fecha, dia, cfg){
+  const r = { fecha, horas:0, horasAus:0, extra:0, extraPagada:0, noComputada:0,
+              importe:0, finde:esFinde(fecha), tipo:(dia&&dia.tipo)||"trabajo", partes:[] };
+  if (!dia) return r;
+  r.partes = dia.partes || [];
+  r.horas = redondea(r.partes.reduce((s,p) => s + (Number(p.horas)||0), 0));
+  r.horasAus = Number(dia.ausenciaHoras) || 0;
+  const computables = r.horas + (cfg.ausenciaCuentaJornada ? r.horasAus : 0);
+
+  if (r.finde && cfg.finSemanaTodoExtra){
+    r.extra = r.horas;
+    r.extraPagada = cfg.finSemanaSoloEnteras ? Math.floor(r.horas) : r.horas;
+    r.noComputada = redondea(r.horas - r.extraPagada);
+    r.importe = redondea(r.extraPagada * cfg.tarifaSabado);
+  } else {
+    r.extra = Math.max(0, redondea(computables - cfg.jornada));
+    r.extraPagada = r.extra;
+    r.importe = redondea(r.extra * (r.finde ? cfg.tarifaSabado : cfg.tarifaSemana));
+  }
+  return r;
+}
+function calcSemana(lun){
+  if (cacheSem.has(lun)) return cacheSem.get(lun);
+  const a = { lunes:lun, dias:[], horas:0, horasAus:0, extra:0, extraPagada:0,
+              noComputada:0, importe:0, ordinarias:0, ausencias:{}, diasTrab:0 };
+  for (let i=0;i<7;i++){
+    const f = addDias(lun,i), c = calcDia(f, S.dias[f], S.config);
+    a.dias.push(c);
+    a.horas += c.horas; a.horasAus += c.horasAus; a.extra += c.extra;
+    a.extraPagada += c.extraPagada; a.noComputada += c.noComputada; a.importe += c.importe;
+    if (c.horas > 0) a.diasTrab++;
+    if (c.tipo !== "trabajo") a.ausencias[c.tipo] = (a.ausencias[c.tipo]||0)+1;
+  }
+  a.ordinarias = a.horas - a.extra;
+  ["horas","horasAus","extra","extraPagada","noComputada","importe","ordinarias"].forEach(k => a[k]=redondea(a[k]));
+  cacheSem.set(lun,a);
+  if (cacheSem.size > 60) cacheSem.delete(cacheSem.keys().next().value);
+  return a;
+}
+function calcMes(mes){
+  if (cacheMes.has(mes)) return cacheMes.get(mes);
+  const [y,m] = mes.split("-").map(Number);
+  const fin = new Date(y,m,0).getDate();
+  const a = { mes, horas:0, extra:0, extraPagada:0, noComputada:0, importeExtra:0,
+              ordinarias:0, diasTrab:0, ausencias:{}, porObra:{}, dias:[] };
+  for (let d=1; d<=fin; d++){
+    const f = `${mes}-${String(d).padStart(2,"0")}`, dd = S.dias[f];
+    if (!dd) continue;
+    const c = calcDia(f, dd, S.config);
+    a.dias.push(c);
+    a.horas += c.horas; a.extra += c.extra; a.extraPagada += c.extraPagada;
+    a.noComputada += c.noComputada; a.importeExtra += c.importe;
+    if (c.horas > 0) a.diasTrab++;
+    if (c.tipo !== "trabajo") a.ausencias[c.tipo] = (a.ausencias[c.tipo]||0)+1;
+    c.partes.forEach(p => a.porObra[p.obra] = redondea((a.porObra[p.obra]||0) + (Number(p.horas)||0)));
+  }
+  a.ordinarias = a.horas - a.extra;
+  ["horas","extra","extraPagada","noComputada","importeExtra","ordinarias"].forEach(k => a[k]=redondea(a[k]));
+  a.total = redondea(S.config.baseNeto + a.importeExtra);
+  a.dias.sort((x,z) => x.fecha < z.fecha ? 1 : -1);
+  cacheMes.set(mes,a);
+  if (cacheMes.size > 36) cacheMes.delete(cacheMes.keys().next().value);
+  return a;
+}
+const extraTipo   = (a,f) => redondea(a.dias.filter(d => d.finde===f).reduce((s,d)=>s+d.extraPagada,0));
+const importeTipo = (a,f) => redondea(a.dias.filter(d => d.finde===f).reduce((s,d)=>s+d.importe,0));
+
+/* ---------- Obras ---------- */
+function registrarObra(nombre){
+  const n = nombre.trim().replace(/\s+/g," ");
+  if (!n) return n;
+  const ya = S.obras.find(o => o.toLowerCase() === n.toLowerCase());
+  if (ya) return ya;
+  S.obras.unshift(n);
+  if (S.obras.length > 300) S.obras.length = 300;
+  return n;
+}
+/** Obras más usadas en los últimos 45 días. Recorre solo esos días, no todo el histórico. */
+function obrasRecientes(n=6){
+  const cuenta = {};
+  let f = hoyISO();
+  for (let i=0;i<45;i++){
+    const d = S.dias[f];
+    if (d) (d.partes||[]).forEach(p => cuenta[p.obra] = (cuenta[p.obra]||0)+1);
+    f = addDias(f,-1);
+  }
+  const orden = Object.keys(cuenta).sort((a,b) => cuenta[b]-cuenta[a]);
+  return orden.length ? orden.slice(0,n) : S.obras.slice(0,n);
+}
+
+/* ============================================================
+   UI helpers
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let toastT;
+function toast(msg){
+  const t = $("#toast"); if(!t) return;
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 2400);
+}
+function abrirSheet(html){ $("#sheetBody").innerHTML = html; $("#sheet").classList.add("on"); }
+function cerrarSheet(){ $("#sheet").classList.remove("on"); }
+
+/**
+ * Pop-up de confirmación. Se usa en TODA acción que borre o modifique un
+ * registro ya guardado, para que nada se pierda por un toque accidental.
+ * Devuelve una promesa: true si confirma, false si cancela.
+ */
+let _resolverModal = null;
+function confirmar(titulo, texto, textoSi, peligro){
+  return new Promise(res => {
+    const m = $("#modal");
+    $("#mTit").textContent = titulo;
+    $("#mTxt").textContent = texto || "";
+    $("#mTxt").style.display = texto ? "" : "none";
+    const si = $("#mSi");
+    si.textContent = textoSi || "Confirmar";
+    si.classList.toggle("peligro", !!peligro);
+    m.classList.add("on");
+    _resolverModal = v => {
+      m.classList.remove("on");
+      _resolverModal = null;
+      res(v);
+    };
+    setTimeout(() => si.focus(), 60);
+  });
+}
+document.addEventListener("click", ev => {
+  if (!_resolverModal) return;
+  if (ev.target.id === "mSi")  _resolverModal(true);
+  if (ev.target.id === "mNo" || ev.target.id === "mBg") _resolverModal(false);
+});
+document.addEventListener("keydown", ev => {
+  if (_resolverModal && ev.key === "Escape") _resolverModal(false);
+});
+
+function grafico(sem){
+  const W=320,H=150,pad={t:12,b:20,l:4,r:4};
+  const bw=(W-pad.l-pad.r)/7, alto=H-pad.t-pad.b;
+  const max=Math.max(S.config.jornada+2, ...sem.dias.map(d=>d.horas+d.horasAus), 1);
+  const y=v=>pad.t+alto-(v/max)*alto;
+  let o=`<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Horas por día">`;
+  const yj=y(S.config.jornada);
+  o+=`<line x1="${pad.l}" y1="${yj}" x2="${W-pad.r}" y2="${yj}" stroke="#8A6A4A" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>`;
+  o+=`<text x="${W-pad.r}" y="${yj-3}" text-anchor="end" opacity=".8">${num(S.config.jornada)}h</text>`;
+  sem.dias.forEach((d,i) => {
+    const x=pad.l+i*bw+bw*0.22, w=bw*0.56;
+    const ord=Math.max(0,d.horas-d.extra), ex=d.extra;
+    const yO=y(ord), hO=(pad.t+alto)-yO;
+    if(hO>0.5) o+=`<rect x="${x}" y="${yO}" width="${w}" height="${hO}" fill="#2A2823" rx="2"/>`;
+    if(ex>0){ const yE=y(ord+ex); o+=`<rect x="${x}" y="${yE}" width="${w}" height="${yO-yE}" fill="#B5602F" rx="2"/>`; }
+    if(d.horasAus>0){ const b=ord+ex, yA=y(b+d.horasAus);
+      o+=`<rect x="${x}" y="${yA}" width="${w}" height="${y(b)-yA}" fill="#8A6A4A" opacity=".45" rx="2"/>`; }
+    if(d.horas+d.horasAus>0) o+=`<text x="${x+w/2}" y="${y(d.horas+d.horasAus)-4}" text-anchor="middle">${num(d.horas+d.horasAus)}</text>`;
+    o+=`<text x="${x+w/2}" y="${H-6}" text-anchor="middle" ${d.finde?'fill="#B5602F"':''}>${DIAS_C[(i+1)%7]}</text>`;
+  });
+  return o+"</svg>";
+}
+function deltaHTML(a,p,unidad,invertir){
+  const d = redondea(a-p);
+  if (Math.abs(d) < 0.005) return `<span class="delta same">= igual</span>`;
+  const sube = d>0, bueno = invertir ? !sube : sube;
+  return `<span class="delta ${bueno?"up":"down"}">${sube?"▲":"▼"} ${unidad==="€"?eur(Math.abs(d)):num(Math.abs(d))+" h"}</span>`;
+}
+
+/* ============================================================
+   ONBOARDING — configuración inicial del trabajador
+   ============================================================ */
+let onbPaso = 0, onbDatos = {};
+function pintarOnboarding(){
+  $("#onb").classList.remove("hide");
+  $("#app").classList.add("hide"); $("#nav").classList.add("hide");
+  const c = onbDatos;
+  const pasos = [
+    () => `<h2>Bienvenido a Jornal</h2>
+      <p class="small muted" style="margin:0 0 18px">Vamos a configurar la app con tus condiciones.
+        Son 3 pantallas y podrás cambiarlo todo después en Ajustes.<br><br>
+        <b style="color:var(--ink)">Tus datos se guardan solo en este móvil.</b> No hay cuentas ni servidores:
+        nadie más puede verlos, ni siquiera quien te ha pasado el enlace.</p>
+      <div class="grupo">
+        <label for="o-nombre">Tu nombre</label>
+        <input id="o-nombre" type="text" value="${esc(c.nombre||"")}" placeholder="Nombre y apellido" autocapitalize="words">
+      </div>
+      <div class="grupo">
+        <label for="o-empresa">Empresa <span class="muted" style="font-weight:400">(opcional)</span></label>
+        <input id="o-empresa" type="text" value="${esc(c.empresa||"")}" placeholder="Nombre de la empresa" autocapitalize="words">
+      </div>`,
+    () => `<h2>Tu nómina</h2>
+      <div class="grupo">
+        <label for="o-base">Nómina que te ingresan en el banco (€/mes)</label>
+        <div class="ayuda">El importe fijo que cobras cada mes sin contar horas extra.</div>
+        <input id="o-base" type="number" step="0.01" min="0" inputmode="decimal" class="mono"
+               value="${c.baseNeto ?? ""}" placeholder="1400" style="text-align:right">
+      </div>
+      <div class="grupo">
+        <label for="o-jornada">Tu jornada normal (horas al día)</label>
+        <div class="ayuda">A partir de aquí, todo lo que trabajes de lunes a viernes cuenta como hora extra.</div>
+        <input id="o-jornada" type="number" step="0.5" min="0" max="24" inputmode="decimal" class="mono"
+               value="${c.jornada ?? ""}" placeholder="8.5" style="text-align:right">
+      </div>
+      <div class="grupo">
+        <label for="o-tsem">Precio de la hora extra de lunes a viernes (€)</label>
+        <input id="o-tsem" type="number" step="0.01" min="0" inputmode="decimal" class="mono"
+               value="${c.tarifaSemana ?? ""}" placeholder="10" style="text-align:right">
+      </div>
+      <div class="grupo">
+        <label for="o-tsab">Precio de la hora de sábado o domingo (€)</label>
+        <input id="o-tsab" type="number" step="0.01" min="0" inputmode="decimal" class="mono"
+               value="${c.tarifaSabado ?? ""}" placeholder="13" style="text-align:right">
+      </div>`,
+    () => `<h2>Cómo te pagan el fin de semana</h2>
+      <p class="small muted" style="margin:0 0 16px">Cada empresa lo hace distinto. Marca lo que se ajuste a la tuya.</p>
+      ${[["finSemanaTodoExtra","Todas las horas del sábado y domingo son extra",
+          "Si lo dejas en NO, el fin de semana funciona como un día normal y solo cuentan las horas por encima de tu jornada."],
+         ["finSemanaSoloEnteras","Solo me pagan las horas completas",
+          "Si trabajas 8,5 h te pagan 8 y la media hora no se computa. Jornal la registra igual para que la tengas a la vista."],
+         ["ausenciaCuentaJornada","El médico y los permisos cuentan como jornada",
+          "Si vas 2 h al médico y trabajas 6,5 h, se considera que has cubierto tu jornada completa."]
+        ].map(([k,l,ayuda]) => `
+        <div class="grupo" style="border-bottom:1px solid var(--line);padding-bottom:13px">
+          <div class="between" style="align-items:flex-start">
+            <div style="flex:1;padding-right:10px">
+              <label style="margin-bottom:3px">${l}</label>
+              <div class="ayuda" style="margin:0">${ayuda}</div>
+            </div>
+            <button class="chip ${c[k]?"on":""}" style="flex:none" data-tog="${k}">${c[k]?"Sí":"No"}</button>
+          </div>
+        </div>`).join("")}
+      <div class="aviso info" style="margin-top:16px">
+        <div><b>Ejemplo con lo que has puesto</b>
+        Un sábado de 8,5 h → ${(() => {
+          const cfg = {...CFG_DEF, ...c};
+          const r = calcDia(sabadoEjemplo(), {partes:[{obra:"x",horas:8.5}],tipo:"trabajo"}, cfg);
+          return `<b style="display:inline">${num(r.extraPagada)} h pagadas = ${eur(r.importe)}</b>` +
+                 (r.noComputada ? ` y ${num(r.noComputada)} h sin computar` : "");
+        })()}</div>
+      </div>`
+  ];
+  $("#onb").innerHTML = `
+    <div class="row" style="gap:9px;margin-bottom:18px">
+      <svg viewBox="0 0 100 100" style="width:30px;height:30px;flex:none">
+        <line x1="50" y1="12" x2="50" y2="38" stroke="#2A2823" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="50" cy="10" r="5" fill="#2A2823"/>
+        <path d="M50 34.5 L61.8 49.5 L59.8 60.5 L50 90.5 L40.2 60.5 L38.2 49.5 Z" fill="#B5602F"/>
+      </svg>
+      <div class="serif" style="font-size:20px;letter-spacing:.16em">JORNAL</div>
+    </div>
+    <div class="pasos">${[0,1,2].map(i => `<i class="${i<=onbPaso?"on":""}"></i>`).join("")}</div>
+    <div class="paso">${pasos[onbPaso]()}</div>
+    <div class="row" style="gap:8px;margin-top:22px">
+      ${onbPaso>0 ? `<button class="btn ghost" style="flex:0 0 34%" data-onb="atras">Atrás</button>`:""}
+      <button class="btn" data-onb="${onbPaso===2?"fin":"sig"}">${onbPaso===2?"Empezar a usar Jornal":"Continuar"}</button>
+    </div>
+    <p class="tiny muted" style="text-align:center;margin-top:16px">Podrás cambiar cualquier dato después.</p>`;
+}
+function sabadoEjemplo(){ let f = hoyISO(); while (dow(f) !== 6) f = addDias(f,1); return f; }
+
+function leerPasoOnb(){
+  const v = id => { const el = $(id); return el ? el.value : undefined; };
+  if (onbPaso === 0){
+    onbDatos.nombre  = (v("#o-nombre")||"").trim();
+    onbDatos.empresa = (v("#o-empresa")||"").trim();
+  } else if (onbPaso === 1){
+    const n = (x,d) => { const y = Number(x); return isFinite(y) && y >= 0 && x !== "" ? y : d; };
+    onbDatos.baseNeto     = n(v("#o-base"),     CFG_DEF.baseNeto);
+    onbDatos.jornada      = n(v("#o-jornada"),  CFG_DEF.jornada);
+    onbDatos.tarifaSemana = n(v("#o-tsem"),     CFG_DEF.tarifaSemana);
+    onbDatos.tarifaSabado = n(v("#o-tsab"),     CFG_DEF.tarifaSabado);
+    if (onbDatos.jornada > 24) onbDatos.jornada = CFG_DEF.jornada;
+  }
+}
+async function onbAccion(a){
+  leerPasoOnb();
+  if (a === "atras"){ onbPaso--; pintarOnboarding(); return; }
+  if (a === "sig"){
+    if (onbPaso === 0 && !onbDatos.nombre){ toast("Escribe tu nombre para continuar"); return; }
+    onbPaso++; pintarOnboarding(); window.scrollTo(0,0); return;
+  }
+  // Finalizar
+  S.perfil = { nombre: onbDatos.nombre || "", empresa: onbDatos.empresa || "" };
+  ["baseNeto","jornada","tarifaSemana","tarifaSabado",
+   "finSemanaTodoExtra","finSemanaSoloEnteras","ausenciaCuentaJornada"].forEach(k => {
+    if (onbDatos[k] !== undefined) S.config[k] = onbDatos[k];
+  });
+  S.onboarded = true;
+  invalidar();
+  await guardar();
+  $("#onb").classList.add("hide");
+  $("#app").classList.remove("hide"); $("#nav").classList.remove("hide");
+  render();
+  toast("Todo listo, " + (S.perfil.nombre.split(" ")[0] || "a registrar") + " 👷");
+  // Nada más terminar el alta es el mejor momento para explicar cómo instalarla
+  if (!estaInstalada() && !instalarOculto()) setTimeout(mostrarInstalar, 2600);
+}
+
+/* ============================================================
+   Vistas
+   ============================================================ */
+let vFecha = hoyISO(), vPartes = [{obra:"",horas:""}], vTipo = "trabajo",
+    vAusH = "", vNota = "", vSemana = lunes(hoyISO()), vMes = mesDe(hoyISO());
+
+function render(){
+  if (!S) return;
+  if (!S.onboarded){ pintarOnboarding(); return; }
+  $("#quien").textContent = S.perfil.nombre ? S.perfil.nombre.split(" ")[0] : "";
+  $("#view").innerHTML =
+    tab==="hoy" ? vistaHoy() : tab==="semana" ? vistaSemana() :
+    tab==="mes" ? vistaMes() : vistaAjustes();
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.t===tab));
+  mostrarAvisos();
+  window.scrollTo(0,0);
+}
+
+/* ---------- Avisos (copia pendiente, fallos) ---------- */
+function mostrarAvisos(){
+  const c = $("#avisos"); if (!c) return;
+  let h = "";
+  if (hayActualizacion()){
+    h += `<div class="aviso info" style="background:#F4E9DC;border-color:#E0C4A6;color:#7A4A22">
+      <div style="flex:1"><b>Nueva versión disponible</b>
+      Se guardará una copia de tus datos y se aplicará sola. No perderás nada.</div>
+      <button class="btn" style="width:auto;padding:9px 16px;font-size:13px" data-acc="actualizar">Actualizar</button></div>`;
+  }
+  if (!estaInstalada() && !instalarOculto()){
+    h += `<div class="aviso info"><div style="flex:1"><b>Ténla siempre a mano</b>
+      Añade Jornal a la pantalla de inicio y se abrirá como una app, incluso sin cobertura.</div>
+      <button class="btn" style="width:auto;padding:9px 14px;font-size:13px" data-acc="instalar">Cómo</button></div>`;
+  }
+  const ult = S.ultimoBackup || S.creado;
+  if (ult && diasEntre(ult, hoyISO()) >= 7 && Object.keys(S.dias).length > 0){
+    h += `<div class="aviso info"><div style="flex:1"><b>Copia semanal pendiente</b>
+      Hace ${diasEntre(ult, hoyISO())} días de la última. Guárdala en Archivos o Drive.</div>
+      <button class="btn" style="width:auto;padding:9px 14px;font-size:13px" data-acc="backup">Guardar</button></div>`;
+  }
+  if (ERRORES.length){
+    h += `<div class="aviso err"><div style="flex:1"><b>Se ha detectado un fallo</b>
+      ${ERRORES.length} incidencia${ERRORES.length===1?"":"s"} registrada${ERRORES.length===1?"":"s"}. Puedes avisar al desarrollador.</div>
+      <button class="btn" style="width:auto;padding:9px 14px;font-size:13px;background:var(--warn)" data-acc="reportar">Avisar</button></div>`;
+  }
+  c.innerHTML = h;
+}
+function mostrarAvisoError(){ if (S && S.onboarded) mostrarAvisos(); }
+
+/* ---------- REGISTRAR ---------- */
+function vistaHoy(){
+  const cfg = S.config, mes = calcMes(mesDe(hoyISO())), yaHay = S.dias[vFecha];
+  const recientes = obrasRecientes();
+  return `
+  <div class="hero">
+    <div class="lbl">Sueldo de ${MESES[+mesDe(hoyISO()).slice(5)-1]}</div>
+    <div class="big">${eur(mes.total)}</div>
+    <div class="grid">
+      <div><b>${eur(cfg.baseNeto)}</b>base</div>
+      <div><b>${eur(mes.importeExtra)}</b>extras</div>
+      <div><b>${num(mes.extraPagada)} h</b>extra</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Nueva jornada</h2>
+    <div class="row" style="margin-bottom:9px">
+      <input type="date" id="fIn" value="${vFecha}" style="flex:1" class="mono" max="${addDias(hoyISO(),365)}">
+      <button class="btn ghost" style="width:auto;padding:11px 13px;white-space:nowrap" data-acc="copiar">Copiar anterior</button>
+    </div>
+    <div class="small muted" style="margin:0 0 12px">${fmtLarga(vFecha)}${
+      esFinde(vFecha)&&cfg.finSemanaTodoExtra ? ' · <span style="color:var(--accent);font-weight:600">todas las horas son extra</span>' : ""}${
+      yaHay ? ' <span class="badge warn">ya registrado</span>' : ""}</div>
+
+    <div class="seg" style="margin-bottom:12px">
+      ${Object.entries(TIPOS).map(([k,v]) =>
+        `<button class="${vTipo===k?"on":""}" data-tipo="${k}">${v.n}</button>`).join("")}
+    </div>
+
+    ${vTipo==="trabajo" ? "" : `
+    <div style="margin-bottom:12px">
+      <div class="small muted" style="margin-bottom:6px">Horas de ${TIPOS[vTipo].n.toLowerCase()} ese día — deja vacío si fue el día completo</div>
+      <input type="number" step="0.5" min="0" max="24" inputmode="decimal" id="ausIn" class="mono"
+             placeholder="${num(cfg.jornada)}" value="${esc(vAusH)}" style="text-align:right">
+    </div>`}
+
+    ${recientes.length ? `<div class="small muted" style="margin-bottom:5px">Obras frecuentes</div>
+      <div class="chips">${recientes.map((o,i) => `<button class="chip" data-obra="${i}">${esc(o)}</button>`).join("")}</div>` : ""}
+
+    <div id="partes">
+      ${vPartes.map((p,i) => `
+      <div class="parte">
+        <input type="text" placeholder="Obra o código" value="${esc(p.obra)}" list="obrasList"
+               data-campo="obra" data-i="${i}" autocapitalize="words" autocomplete="off" enterkeyhint="next">
+        <input type="number" step="0.5" min="0" max="24" inputmode="decimal" placeholder="0" value="${esc(p.horas)}"
+               data-campo="horas" data-i="${i}" class="mono" enterkeyhint="done">
+        <button class="del" data-quitar="${i}" ${vPartes.length===1?'style="visibility:hidden"':""} aria-label="Quitar línea">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+        </button>
+      </div>`).join("")}
+    </div>
+    <datalist id="obrasList">${S.obras.slice(0,80).map(o => `<option value="${esc(o)}">`).join("")}</datalist>
+
+    <button class="btn ghost" style="margin:2px 0 10px" data-acc="mas">+ Otra obra ese día</button>
+
+    <div class="grupo" style="margin-bottom:11px">
+      <input type="text" id="notaIn" placeholder="Nota del día (opcional)" value="${esc(vNota)}"
+             maxlength="140" autocapitalize="sentences">
+    </div>
+
+    <div id="previo">${previoHTML()}</div>
+    <button class="btn" data-acc="guardar">${yaHay ? "Actualizar día" : "Guardar día"}</button>
+  </div>
+
+  ${listaDias(fechasOrdenadas().slice(0,10), "Últimas jornadas")}`;
+}
+/** Resumen en vivo del día que se está tecleando */
+function previoHTML(){
+  const p = calcDia(vFecha, {
+    partes: vPartes.filter(x => x.obra.trim() && Number(x.horas) > 0)
+                   .map(x => ({obra:x.obra, horas:Number(x.horas)})),
+    tipo: vTipo, ausenciaHoras: Number(vAusH)||0
+  }, S.config);
+  if (p.horas <= 0) return "";
+  return `<div style="background:var(--band);border-radius:10px;padding:11px;margin-bottom:12px" class="small">
+    <div class="between"><span>Total del día</span><b class="mono">${num(p.horas)} h</b></div>
+    ${p.extra>0 ? `<div class="between" style="color:var(--accent);font-weight:600">
+      <span>Horas extra${p.finde?" (fin de semana)":""}</span>
+      <b class="mono">${num(p.extraPagada)} h · ${eur(p.importe)}</b></div>` : ""}
+    ${p.noComputada>0 ? `<div class="between" style="color:var(--warn)">
+      <span>No computadas</span><b class="mono">${num(p.noComputada)} h</b></div>` : ""}
+  </div>`;
+}
+function refrescarPrevio(){
+  const el = $("#previo");
+  if (el) el.innerHTML = previoHTML();
+}
+
+function listaDias(fechas, titulo){
+  if (!fechas.length)
+    return `<h2>${titulo}</h2><p class="small muted" style="font-style:italic">Todavía no hay jornadas registradas.</p>`;
+  return `<h2>${titulo}</h2>` + fechas.map(f => {
+    const d = S.dias[f]; if (!d) return "";
+    const c = calcDia(f, d, S.config), raro = c.horas > 16;
+    return `<div class="dia">
+      <div class="cab">
+        <div><span class="d">${DIAS[dow(f)]}</span> <span class="f">${fmtCorta(f)}</span>
+          ${c.tipo!=="trabajo" ? `<span class="badge aus">${TIPOS[c.tipo].n}</span>`:""}
+          ${raro ? `<span class="badge warn">revisar</span>`:""}</div>
+        <div class="h">${num(c.horas)}h${
+          c.extra>0 ? `<br><b>${num(c.extraPagada)}h extra · ${eur(c.importe)}</b>`:""}${
+          c.noComputada>0 ? `<br><span style="color:var(--warn)">${num(c.noComputada)}h sin computar</span>`:""}</div>
+      </div>
+      ${c.horasAus>0 ? `<div class="p"><span class="muted">${TIPOS[c.tipo].n}</span><span class="hh">${num(c.horasAus)}h</span></div>`:""}
+      ${c.partes.map(p => `<div class="p"><span>${esc(p.obra)}</span><span class="hh">${num(p.horas)}h</span></div>`).join("")}
+      ${d.nota ? `<div class="p"><span class="small muted" style="font-style:italic">${esc(d.nota)}</span></div>`:""}
+      <div class="p" style="justify-content:flex-end;gap:16px">
+        <button class="link" data-editar="${f}">Editar</button>
+        <button class="link" style="color:var(--warn)" data-borrar="${f}">Borrar</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+/* ---------- SEMANA ---------- */
+function vistaSemana(){
+  const a = calcSemana(vSemana), p = calcSemana(addDias(vSemana,-7));
+  const fin = addDias(vSemana,6), esActual = vSemana === lunes(hoyISO());
+  const aus = Object.entries(a.ausencias);
+  return `
+  <div class="between" style="margin-bottom:12px">
+    <button class="btn ghost" style="width:auto;padding:9px 15px" data-sem="-7" aria-label="Semana anterior">←</button>
+    <div style="text-align:center;line-height:1.25">
+      <div style="font-weight:600;font-size:15px">${fmtCorta(vSemana)} – ${fmtCorta(fin)}</div>
+      <div class="tiny muted">${esActual?"Semana actual":parse(vSemana).getFullYear()}</div>
+    </div>
+    <button class="btn ghost" style="width:auto;padding:9px 15px" data-sem="7" ${esActual?"disabled":""} aria-label="Semana siguiente">→</button>
+  </div>
+  <div class="hero">
+    <div class="lbl">Generado esta semana en extras</div>
+    <div class="big">${eur(a.importe)}</div>
+    <div class="grid">
+      <div><b>${num(a.horas)} h</b>trabajadas</div>
+      <div><b>${num(a.extraPagada)} h</b>extra</div>
+      <div><b>${a.diasTrab}</b>días</div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Reparto por día</h2>
+    ${grafico(a)}
+    <div class="row tiny muted" style="gap:14px;justify-content:center;margin-top:6px">
+      <span><i style="display:inline-block;width:9px;height:9px;background:#2A2823;border-radius:2px;margin-right:4px"></i>ordinarias</span>
+      <span><i style="display:inline-block;width:9px;height:9px;background:#B5602F;border-radius:2px;margin-right:4px"></i>extra</span>
+      <span><i style="display:inline-block;width:9px;height:9px;background:#8A6A4A;opacity:.45;border-radius:2px;margin-right:4px"></i>ausencia</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Comparativa con la semana anterior</h2>
+    <div class="stat"><span>Horas trabajadas</span><span><b>${num(a.horas)}</b> ${deltaHTML(a.horas,p.horas,"h")}</span></div>
+    <div class="stat"><span>De ellas, ordinarias</span><span><b>${num(a.ordinarias)}</b> ${deltaHTML(a.ordinarias,p.ordinarias,"h")}</span></div>
+    <div class="stat"><span>Horas extra pagadas</span><span><b>${num(a.extraPagada)}</b> ${deltaHTML(a.extraPagada,p.extraPagada,"h")}</span></div>
+    <div class="stat"><span>Importe en extras</span><span><b>${eur(a.importe)}</b> ${deltaHTML(a.importe,p.importe,"€")}</span></div>
+    ${(a.noComputada||p.noComputada) ? `<div class="stat"><span class="muted">Horas no computadas</span><span><b style="color:var(--warn)">${num(a.noComputada)}</b> ${deltaHTML(a.noComputada,p.noComputada,"h",true)}</span></div>`:""}
+    <div class="tiny muted" style="margin-top:9px">Semana anterior: ${num(p.horas)} h · ${eur(p.importe)} en extras</div>
+  </div>
+  ${aus.length ? `<div class="card"><h2>Ausencias</h2>
+    ${aus.map(([k,v]) => `<div class="stat"><span>${TIPOS[k].n}</span><b>${v} ${v===1?"día":"días"}</b></div>`).join("")}
+    ${a.horasAus>0 ? `<div class="stat"><span class="muted">Horas totales</span><b>${num(a.horasAus)} h</b></div>`:""}</div>`:""}
+  ${listaDias(a.dias.filter(d => d.horas>0 || d.tipo!=="trabajo").map(d=>d.fecha).reverse(), "Detalle")}`;
+}
+
+/* ---------- MES ---------- */
+function vistaMes(){
+  const a = calcMes(vMes), [y,m] = vMes.split("-").map(Number);
+  const esActual = vMes === mesDe(hoyISO()), nom = S.nominas[vMes];
+  const dif = nom != null ? redondea(nom - a.total) : null;
+  const obras = Object.entries(a.porObra).sort((x,z) => z[1]-x[1]);
+  return `
+  <div class="between" style="margin-bottom:12px">
+    <button class="btn ghost" style="width:auto;padding:9px 15px" data-mes="-1" aria-label="Mes anterior">←</button>
+    <div style="text-align:center;line-height:1.25">
+      <div style="font-weight:600;font-size:15px;text-transform:capitalize">${MESES[m-1]} ${y}</div>
+      <div class="tiny muted">${esActual?"Mes en curso":`${a.diasTrab} días trabajados`}</div>
+    </div>
+    <button class="btn ghost" style="width:auto;padding:9px 15px" data-mes="1" ${esActual?"disabled":""} aria-label="Mes siguiente">→</button>
+  </div>
+  <div class="hero">
+    <div class="lbl">${esActual?"Llevas acumulado":"Total del mes"}</div>
+    <div class="big">${eur(a.total)}</div>
+    <div class="grid">
+      <div><b>${eur(S.config.baseNeto)}</b>base</div>
+      <div><b>${eur(a.importeExtra)}</b>extras</div>
+      <div><b>${num(a.horas)} h</b>trabajadas</div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Desglose</h2>
+    <div class="stat"><span>Salario base</span><b>${eur(S.config.baseNeto)}</b></div>
+    <div class="stat"><span>Extra entre semana <span class="muted tiny">${num(extraTipo(a,false))} h × ${eur(S.config.tarifaSemana)}</span></span><b>${eur(importeTipo(a,false))}</b></div>
+    <div class="stat"><span>Extra fin de semana <span class="muted tiny">${num(extraTipo(a,true))} h × ${eur(S.config.tarifaSabado)}</span></span><b>${eur(importeTipo(a,true))}</b></div>
+    <div class="stat tot"><span>Total a cobrar</span><b>${eur(a.total)}</b></div>
+    ${a.noComputada>0 ? `<div class="tiny" style="color:var(--warn);margin-top:9px">⚠ ${num(a.noComputada)} h trabajadas en fin de semana que no se computan por el redondeo a horas completas.</div>`:""}
+  </div>
+  <div class="card">
+    <h2>Verificación de nómina</h2>
+    ${nom == null ? `
+      <p class="small muted" style="margin:0 0 10px">Cuando cobres, apunta el importe real y comprueba si cuadra.</p>
+      <div class="row">
+        <input type="number" step="0.01" min="0" inputmode="decimal" id="nomIn" class="mono" placeholder="Importe cobrado" style="text-align:right">
+        <button class="btn" style="width:auto;padding:12px 18px" data-acc="nomina">OK</button>
+      </div>` : `
+      <div class="stat"><span>Calculado por Jornal</span><b>${eur(a.total)}</b></div>
+      <div class="stat"><span>Cobrado realmente</span><b>${eur(nom)}</b></div>
+      <div class="stat tot"><span>${dif===0?"Cuadra":dif>0?"Te han pagado de más":"Te falta por cobrar"}</span>
+        <b style="color:${dif<0?"var(--warn)":"var(--ok)"}">${dif===0?"✓ 0,00 €":eur(Math.abs(dif))}</b></div>
+      ${dif<0 && S.config.tarifaSemana>0 ? `<div class="tiny" style="color:var(--warn);margin-top:9px">Equivale a ${num(Math.abs(dif)/S.config.tarifaSemana)} h extra entre semana sin pagar.</div>`:""}
+      <button class="link" style="margin-top:10px" data-acc="nomina-borrar">Corregir importe</button>`}
+  </div>
+  ${obras.length ? `<div class="card"><h2>Horas por obra</h2>
+    ${obras.map(([o,h]) => `<div class="stat"><span>${esc(o)}</span><b>${num(h)} h</b></div>`).join("")}</div>`:""}
+  ${Object.keys(a.ausencias).length ? `<div class="card"><h2>Ausencias del mes</h2>
+    ${Object.entries(a.ausencias).map(([k,v]) => `<div class="stat"><span>${TIPOS[k].n}</span><b>${v} ${v===1?"día":"días"}</b></div>`).join("")}</div>`:""}
+  <div class="row no-print" style="gap:8px;margin-bottom:14px">
+    <button class="btn sec" data-acc="csv">Exportar CSV</button>
+    <button class="btn sec" data-acc="print">Informe PDF</button>
+  </div>
+  ${listaDias(a.dias.map(d=>d.fecha), "Jornadas del mes")}`;
+}
+
+/* ---------- AJUSTES ---------- */
+function vistaAjustes(){
+  const c = S.config;
+  const campos = [["baseNeto","Nómina base (€/mes)","0.01"],["jornada","Jornada ordinaria (h/día)","0.5"],
+                  ["tarifaSemana","€ hora extra L-V","0.01"],["tarifaSabado","€ hora sáb/dom","0.01"]];
+  const flags = [["finSemanaTodoExtra","Fin de semana: todas las horas son extra"],
+                 ["finSemanaSoloEnteras","Fin de semana: pagar solo horas completas"],
+                 ["ausenciaCuentaJornada","Médico y permisos cuentan como jornada"]];
+  const ej = calcDia(sabadoEjemplo(), {partes:[{obra:"x",horas:8.5}],tipo:"trabajo"}, c);
+  return `
+  <div class="card">
+    <h2>Trabajador</h2>
+    <div class="grupo" style="margin-bottom:10px">
+      <input type="text" id="pNombre" value="${esc(S.perfil.nombre)}" placeholder="Tu nombre" autocapitalize="words">
+    </div>
+    <input type="text" id="pEmpresa" value="${esc(S.perfil.empresa)}" placeholder="Empresa (opcional)" autocapitalize="words">
+  </div>
+
+  <div class="card">
+    <h2>Tarifas</h2>
+    ${campos.map(([k,l,st]) => `
+      <div class="between" style="padding:7px 0">
+        <label class="small" style="flex:1" for="cfg-${k}">${l}</label>
+        <input id="cfg-${k}" type="number" step="${st}" min="0" inputmode="decimal" value="${c[k]}" class="mono"
+               style="width:106px;text-align:right;flex:none" data-cfg="${k}">
+      </div>`).join("")}
+  </div>
+
+  <div class="card">
+    <h2>Reglas de cálculo</h2>
+    ${flags.map(([k,l]) => `
+      <div class="between" style="padding:9px 0;border-bottom:1px solid #F2EDE0">
+        <label class="small" style="flex:1;padding-right:10px">${l}</label>
+        <button class="chip ${c[k]?"on":""}" style="flex:none" data-tog="${k}">${c[k]?"Sí":"No"}</button>
+      </div>`).join("")}
+    <p class="tiny muted" style="margin:10px 0 0">Con tu configuración, un sábado de 8,5 h son
+      <b>${num(ej.extraPagada)} h</b> pagadas = <b>${eur(ej.importe)}</b>${ej.noComputada?`, y ${num(ej.noComputada)} h registradas sin computar`:""}.</p>
+  </div>
+
+  <div class="card">
+    <h2>Copias de seguridad</h2>
+    <div class="stat"><span>Jornadas registradas</span><b>${Object.keys(S.dias).length}</b></div>
+    <div class="stat"><span>Última copia descargada</span><b class="tiny">${S.ultimoBackup?fmtCorta(S.ultimoBackup):"nunca"}</b></div>
+    <div class="stat"><span>Copias automáticas internas</span><b class="tiny" id="nSnap">…</b></div>
+    <div class="stat"><span>Almacenamiento protegido</span><b class="tiny" id="persistEstado">…</b></div>
+    <div style="display:grid;gap:8px;margin-top:12px">
+      <button class="btn" data-acc="backup">Descargar copia de seguridad</button>
+      <button class="btn sec" data-acc="restaurar">Restaurar desde archivo</button>
+      <button class="btn ghost" data-acc="snapshots">Copias automáticas del móvil</button>
+      <input type="file" id="fileIn" accept=".json,application/json" class="hide">
+    </div>
+    <p class="tiny muted" style="margin:12px 0 0">Jornal guarda una copia automática dentro del móvil cada 7 días.
+      Aun así, descarga el archivo y súbelo a iCloud o Drive: es lo único que sobrevive si pierdes el teléfono.</p>
+  </div>
+
+  <div class="card">
+    <h2>Obras</h2>
+    <button class="btn ghost" data-acc="obras">Gestionar catálogo (${S.obras.length})</button>
+  </div>
+
+  <div class="card">
+    <h2>¿Algo no funciona?</h2>
+    <p class="small muted" style="margin:0 0 10px">Envía un informe técnico al desarrollador.
+      Incluye solo el error y el modelo de navegador: <b>nunca</b> tus jornadas, obras ni importes.</p>
+    <div class="stat"><span>Fallos registrados</span><b style="color:${ERRORES.length?"var(--warn)":"var(--ok)"}">${ERRORES.length}</b></div>
+    <div style="display:grid;gap:8px;margin-top:12px">
+      <button class="btn ${ERRORES.length?"":"sec"}" data-acc="reportar">Enviar informe por correo</button>
+      <button class="btn ghost" data-acc="copiar-informe">Copiar informe</button>
+      ${ERRORES.length ? `<button class="link" data-acc="limpiar-errores">Vaciar registro de fallos</button>`:""}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Acerca de</h2>
+    <p class="small muted" style="margin:0">Jornal · versión ${APP_VER}<br>
+      Tus datos, solo en este dispositivo.<br>
+      Almacén: ${ALMACEN} · Guardado: ${S.guardado?new Date(S.guardado).toLocaleString("es-ES"):"—"}</p>
+    <div style="display:grid;gap:8px;margin-top:12px">
+      ${hayActualizacion()
+        ? `<button class="btn" data-acc="actualizar">Actualizar a la versión nueva</button>`
+        : `<button class="btn ghost" data-acc="buscar-update">Buscar actualizaciones</button>`}
+      <button class="btn ghost" data-acc="novedades">Ver novedades de esta versión</button>
+      <button class="btn ${estaInstalada()?"ghost":"sec"}" data-acc="instalar">
+        ${estaInstalada()?"Instalada en la pantalla de inicio ✓":"Instalar en la pantalla de inicio"}</button>
+      <button class="btn ghost" data-acc="compartir">Compartir la app con un compañero</button>
+      <button class="link" style="color:var(--warn)" data-acc="borrar-todo">Borrar todos mis datos</button>
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   Acciones
+   ============================================================ */
+function masParte(){ vPartes.push({obra:"",horas:""}); render(); }
+function quitarParte(i){ if (vPartes.length>1){ vPartes.splice(i,1); render(); } }
+function ponObra(o){
+  const libre = vPartes.findIndex(p => !p.obra.trim());
+  if (libre>=0) vPartes[libre].obra = o; else vPartes.push({obra:o,horas:""});
+  render();
+  const inputs = document.querySelectorAll('#partes input[data-campo="horas"]');
+  const idx = libre>=0 ? libre : vPartes.length-1;
+  if (inputs[idx]) inputs[idx].focus();
+}
+function copiarAnterior(){
+  let f = vFecha;
+  for (let i=0;i<21;i++){
+    f = addDias(f,-1);
+    const d = S.dias[f];
+    if (d && d.partes && d.partes.length){
+      vPartes = d.partes.map(p => ({obra:p.obra, horas:String(p.horas)}));
+      vTipo = d.tipo || "trabajo";
+      render(); toast(`Copiado de ${fmtCorta(f)}`); return;
+    }
+  }
+  toast("No hay ningún día anterior que copiar");
+}
+async function guardarDia(){
+  const partes = vPartes.filter(p => p.obra.trim() && Number(p.horas)>0)
+    .map(p => ({obra: registrarObra(p.obra), horas: redondea(Number(p.horas))}));
+  const total = partes.reduce((s,p)=>s+p.horas,0);
+  const ausH = Number(vAusH)||0;
+  if (!partes.length && vTipo==="trabajo"){ toast("Añade al menos una obra con horas"); return; }
+  if (total > 24 || total + ausH > 24){ toast("Ese día suma más de 24 horas"); return; }
+
+  const nuevo = !S.dias[vFecha];
+  if (!nuevo){
+    const ant = calcDia(vFecha, S.dias[vFecha], S.config);
+    const ok = await confirmar("¿Sobrescribir esta jornada?",
+      `El ${fmtLarga(vFecha)} ya tiene ${num(ant.horas)} h registradas. Se sustituirán por ${num(total)} h.`,
+      "Sí, sobrescribir", true);
+    if (!ok) return;
+  }
+  S.dias[vFecha] = { tipo:vTipo, partes,
+    ausenciaHoras: vTipo==="trabajo" ? 0 : (ausH || (partes.length ? 0 : S.config.jornada)),
+    nota: (vNota||"").slice(0,140) };
+  if (nuevo) _ordenadas = null;
+  await guardar(vFecha);
+
+  const c = calcDia(vFecha, S.dias[vFecha], S.config);
+  vPartes = [{obra:"",horas:""}]; vTipo="trabajo"; vAusH=""; vNota=""; vFecha = hoyISO();
+  render();
+  toast(c.importe>0 ? `Guardado · +${eur(c.importe)} en extras` : "Jornada guardada");
+  snapshotSemanal();
+}
+async function editar(f){
+  const d = S.dias[f]; if (!d) return;
+  const hayEnCurso = vPartes.some(p => p.obra.trim() || p.horas);
+  const ok = await confirmar("¿Editar esta jornada?",
+    `Se cargará el ${fmtLarga(f)} en el formulario para que lo modifiques.` +
+    (hayEnCurso ? " Perderás lo que estabas escribiendo ahora." : ""),
+    "Sí, editar");
+  if (!ok) return;
+  vFecha = f;
+  vPartes = (d.partes||[]).length ? d.partes.map(p=>({obra:p.obra,horas:String(p.horas)})) : [{obra:"",horas:""}];
+  vTipo = d.tipo||"trabajo";
+  vAusH = d.ausenciaHoras ? String(d.ausenciaHoras) : "";
+  vNota = d.nota||"";
+  tab = "hoy"; render(); toast("Editando " + fmtCorta(f));
+}
+async function borrar(f){
+  const c = calcDia(f, S.dias[f], S.config);
+  const ok = await confirmar("¿Borrar esta jornada?",
+    `Se eliminará el ${fmtLarga(f)}: ${num(c.horas)} h` +
+    (c.importe > 0 ? ` y ${eur(c.importe)} en extras.` : ".") + " No se puede deshacer.",
+    "Sí, borrar", true);
+  if (!ok) return;
+  delete S.dias[f]; _ordenadas = null;
+  await guardar(f); render(); toast("Jornada borrada");
+}
+async function setCfg(k,v){
+  const n = Number(v);
+  if (!isFinite(n) || n < 0 || (k==="jornada" && n > 24)){ toast("Valor no válido"); render(); return; }
+  S.config[k] = n; invalidar(); await guardar(); render(); toast("Ajuste guardado");
+}
+async function togCfg(k){ S.config[k] = !S.config[k]; invalidar(); await guardar(); render(); }
+async function guardarNomina(){
+  const v = Number($("#nomIn").value);
+  if (!isFinite(v) || v <= 0){ toast("Escribe el importe cobrado"); return; }
+  S.nominas[vMes] = redondea(v); await guardar(); render();
+}
+
+/* ---------- Catálogo de obras ---------- */
+function gestionarObras(){
+  abrirSheet(`<h2>Obras del catálogo</h2>
+    <p class="small muted">Renombrar una obra unifica erratas: se actualizan todas las jornadas donde aparezca.</p>
+    ${S.obras.map((o,i) => `<div class="between" style="padding:9px 0;border-bottom:1px solid var(--line)">
+      <span class="small">${esc(o)}</span>
+      <span class="row" style="gap:14px;flex:none">
+        <button class="link" data-ren="${i}">Renombrar</button>
+        <button class="link" style="color:var(--warn)" data-quitobra="${i}">Quitar</button>
+      </span></div>`).join("") || '<p class="small muted">Todavía no hay obras.</p>'}
+    <button class="btn sec" style="margin-top:14px" data-cerrar>Cerrar</button>`);
+}
+function contarUsos(obra){
+  let n = 0;
+  for (const f in S.dias) (S.dias[f].partes||[]).forEach(p => { if (p.obra === obra) n++; });
+  return n;
+}
+/* Formulario de renombrado dentro de la app: prompt() lo bloquean algunos
+   navegadores y en una app instalada queda feo. */
+function renombrarObra(i){
+  const viejo = S.obras[i], usos = contarUsos(viejo);
+  abrirSheet(`<h2>Renombrar obra</h2>
+    <p class="small muted">Aparece en <b>${usos}</b> línea${usos===1?"":"s"} ya registrada${usos===1?"":"s"}.
+      Al cambiarle el nombre se actualizan todas: es la forma de unificar erratas.</p>
+    <label class="small" style="display:block;font-weight:600;margin:14px 0 5px">Nombre actual</label>
+    <input type="text" value="${esc(viejo)}" disabled style="opacity:.6">
+    <label class="small" style="display:block;font-weight:600;margin:14px 0 5px">Nombre nuevo</label>
+    <input type="text" id="renIn" value="${esc(viejo)}" autocapitalize="words" enterkeyhint="done">
+    <div style="display:grid;gap:8px;margin-top:18px">
+      <button class="btn" data-renok="${i}">Renombrar</button>
+      <button class="btn sec" data-cerrar>Cancelar</button>
+    </div>`);
+  setTimeout(() => { const el = $("#renIn"); if (el){ el.focus(); el.select(); } }, 80);
+}
+async function confirmarRenombrar(i){
+  const viejo = S.obras[i];
+  const el = $("#renIn");
+  const n = el ? el.value.trim().replace(/\s+/g," ") : "";
+  if (!n){ toast("Escribe un nombre"); return; }
+  if (n === viejo){ cerrarSheet(); return; }
+  const usos = contarUsos(viejo);
+  const choque = S.obras.find(o => o !== viejo && o.toLowerCase() === n.toLowerCase());
+  const ok = await confirmar("¿Renombrar la obra?",
+    `«${viejo}» pasará a llamarse «${n}» en ${usos} línea${usos===1?"":"s"} ya registrada${usos===1?"":"s"}.` +
+    (choque ? ` Se fusionará con la obra «${choque}», que ya existe.` : ""),
+    "Sí, renombrar");
+  if (!ok) return;
+  let tocados = 0;
+  for (const f in S.dias)
+    (S.dias[f].partes||[]).forEach(p => { if (p.obra === viejo){ p.obra = n; tocados++; } });
+  S.obras[i] = n;
+  S.obras = [...new Set(S.obras)];
+  invalidar(); await guardar(); gestionarObras(); render();
+  toast(`Renombrada en ${tocados} línea${tocados===1?"":"s"}`);
+}
+async function quitarObra(i){
+  const obra = S.obras[i], usos = contarUsos(obra);
+  const ok = await confirmar("¿Quitar del catálogo?",
+    usos ? `«${obra}» dejará de aparecer en las sugerencias, pero las ${usos} jornadas donde ya está registrada NO se tocan.`
+         : `«${obra}» se quitará de las sugerencias.`,
+    "Sí, quitar", true);
+  if (!ok) return;
+  S.obras.splice(i,1); await guardar(); gestionarObras();
+}
+
+/* ---------- Exportar / copias ---------- */
+function descarga(nombre, contenido, tipo){
+  try{
+    const url = URL.createObjectURL(new Blob([contenido],{type:tipo}));
+    const a = document.createElement("a");
+    a.href = url; a.download = nombre; a.rel = "noopener";
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+    return true;
+  } catch(e){ apuntarError("descarga", e); toast("No se ha podido descargar"); return false; }
+}
+function exportarCSV(){
+  const a = calcMes(vMes);
+  const F = [["Trabajador", S.perfil.nombre||""],["Empresa", S.perfil.empresa||""],
+             ["Periodo", `${MESES[+vMes.slice(5)-1]} ${vMes.slice(0,4)}`],[],
+             ["Fecha","Día","Tipo","Obra","Horas","Total día","Horas extra","Importe extra","No computadas","Nota"]];
+  a.dias.slice().reverse().forEach(c => {
+    const nota = (S.dias[c.fecha]||{}).nota || "";
+    if (!c.partes.length)
+      F.push([c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n, "", "", num(c.horas), "", "", "", nota]);
+    c.partes.forEach((p,i) => F.push([
+      c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n, p.obra, num(p.horas),
+      i===0?num(c.horas):"", i===0?num(c.extraPagada):"", i===0?num(c.importe):"",
+      i===0&&c.noComputada?num(c.noComputada):"", i===0?nota:""
+    ]));
+  });
+  F.push([], ["","","","","","TOTAL HORAS",num(a.horas)],
+             ["","","","","","HORAS EXTRA",num(a.extraPagada)],
+             ["","","","","","IMPORTE EXTRAS",num(a.importeExtra)],
+             ["","","","","","SALARIO BASE",num(S.config.baseNeto)],
+             ["","","","","","TOTAL A COBRAR",num(a.total)]);
+  const csv = "﻿" + F.map(f => f.map(c => `"${String(c??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
+  if (descarga(`jornal-${vMes}.csv`, csv, "text/csv;charset=utf-8")) toast("CSV descargado — se abre con Excel");
+}
+async function descargarBackup(){
+  const nombre = `jornal-${(S.perfil.nombre||"copia").split(" ")[0].toLowerCase()}-${hoyISO()}.json`;
+  if (!descarga(nombre, JSON.stringify(S), "application/json")) return;
+  S.ultimoBackup = hoyISO(); await guardar(); render();
+  toast("Guárdala en Archivos → iCloud Drive o Google Drive");
+}
+function pedirRestaurar(){ $("#fileIn").click(); }
+function restaurar(input){
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  if (f.size > 25*1024*1024){ toast("El archivo es demasiado grande"); return; }
+  const fr = new FileReader();
+  fr.onerror = () => { apuntarError("leer-archivo", fr.error); toast("No se ha podido leer el archivo"); };
+  fr.onload = async () => {
+    try{
+      const d = JSON.parse(fr.result);
+      if (!d || typeof d !== "object" || typeof d.dias !== "object") throw new Error("formato");
+      const n = Object.keys(d.dias).length;
+      const ok = await confirmar("¿Restaurar esta copia?",
+        `Contiene ${n} jornadas y sustituirá por completo las ${Object.keys(S.dias).length} que tienes ahora. No se puede deshacer.`,
+        "Sí, restaurar", true);
+      if (!ok) return;
+      S = {...estadoNuevo(), ...d,
+           config:{...CFG_DEF, ...(d.config||{})},
+           perfil:{nombre:"",empresa:"", ...(d.perfil||{})},
+           nominas: d.nominas||{}, obras: Array.isArray(d.obras)?d.obras:[],
+           onboarded:true};
+      invalidar(); await guardar(); render(); toast(`Restauradas ${n} jornadas`);
+    } catch(e){ apuntarError("restaurar", e); toast("El archivo no es una copia válida de Jornal"); }
+  };
+  fr.readAsText(f);
+}
+async function verSnapshots(){
+  const s = await listarSnapshots();
+  abrirSheet(`<h2>Copias automáticas del móvil</h2>
+    <p class="small muted">Jornal guarda una cada 7 días dentro del propio teléfono. Se conservan las ${MAX_SNAP} últimas.</p>
+    ${s.length ? s.slice().reverse().map((x,i) => {
+      let n = "?"; try{ n = Object.keys(JSON.parse(x.datos).dias).length; }catch(_){}
+      return `<div class="between" style="padding:10px 0;border-bottom:1px solid var(--line)">
+        <span class="small" style="flex:1">${fmtCorta(x.fecha)}
+          <span class="muted tiny">· ${n} jornadas</span>
+          ${x.motivo && x.motivo !== "semanal" ? `<br><span class="tiny muted">${esc(x.motivo)}</span>`:""}</span>
+        <button class="link" data-snap="${s.length-1-i}">Restaurar</button></div>`;
+    }).join("") : '<p class="small muted">Todavía no hay ninguna. Se creará automáticamente.</p>'}
+    <button class="btn sec" style="margin-top:14px" data-cerrar>Cerrar</button>`);
+}
+async function restaurarSnap(i){
+  const s = await listarSnapshots();
+  const x = s[i]; if (!x) return;
+  const ok = await confirmar("¿Volver a esta copia?",
+    `La app volverá al estado del ${fmtCorta(x.fecha)}. Todo lo registrado después de esa fecha se perderá.`,
+    "Sí, restaurar", true);
+  if (!ok) return;
+  try{
+    const d = JSON.parse(x.datos);
+    S = {...estadoNuevo(), ...d, config:{...CFG_DEF, ...(d.config||{})}, onboarded:true};
+    invalidar(); await guardar(); cerrarSheet(); render(); toast("Copia restaurada");
+  } catch(e){ apuntarError("restaurar-snap", e); toast("Esa copia está dañada"); }
+}
+async function borrarTodo(){
+  const n = Object.keys(S.dias).length;
+  const uno = await confirmar("¿Borrar todos tus datos?",
+    `Se eliminarán las ${n} jornadas, tus tarifas y tu perfil de este dispositivo.`,
+    "Continuar", true);
+  if (!uno) return;
+  const dos = await confirmar("Última confirmación",
+    "Esto no se puede deshacer. ¿Has descargado antes una copia de seguridad?",
+    "Sí, borrar todo", true);
+  if (!dos) return;
+  S = estadoNuevo(); invalidar(); await guardar();
+  onbPaso = 0; onbDatos = {...CFG_DEF};
+  render(); toast("Datos borrados");
+}
+/* ============================================================
+   Actualizaciones
+   El service worker descarga la versión nueva pero NO la aplica. La app avisa
+   con un botón; al pulsarlo se guarda una copia de seguridad local y solo
+   entonces se activa. Los datos viven en IndexedDB, aparte de la caché de la
+   app, así que una actualización nunca los toca.
+   ============================================================ */
+let swReg = null, swEsperando = null, recargando = false;
+
+function hayActualizacion(){ return !!swEsperando; }
+
+async function aplicarActualizacion(){
+  if (!swEsperando) return;
+  const btn = document.querySelector('[data-acc="actualizar"]');
+  if (btn){ btn.textContent = "Guardando copia…"; btn.disabled = true; }
+
+  // 1) Copia de seguridad ANTES de tocar nada
+  const ok = await snapshotAhora("antes de actualizar a " + APP_VER);
+  if (!ok){
+    const seguir = await confirmar("No se ha podido guardar la copia",
+      "¿Quieres actualizar igualmente? Tus datos están guardados aparte y no deberían verse afectados.",
+      "Actualizar igualmente", true);
+    if (!seguir){ if (btn){ btn.textContent = "Actualizar"; btn.disabled = false; } return; }
+  }
+  // 2) Dejar constancia de desde qué versión venimos, para enseñar las novedades
+  try { localStorage.setItem("jornal:ver-anterior", S.verVista || "0"); } catch(_){}
+  if (btn) btn.textContent = "Actualizando…";
+
+  // 3) Pedir al service worker que active la versión nueva
+  swEsperando.postMessage({ tipo: "APLICAR_ACTUALIZACION" });
+  setTimeout(() => { if (!recargando){ recargando = true; location.reload(); } }, 2500);
+}
+
+function vigilarActualizacion(reg){
+  if (!reg) return;
+  swReg = reg;
+  const revisar = () => {
+    if (reg.waiting && navigator.serviceWorker.controller){
+      swEsperando = reg.waiting;
+      mostrarAvisos();
+    }
+  };
+  revisar();
+  reg.addEventListener("updatefound", () => {
+    const nw = reg.installing;
+    if (!nw) return;
+    nw.addEventListener("statechange", () => {
+      if (nw.state === "installed" && navigator.serviceWorker.controller){
+        swEsperando = reg.waiting || nw;
+        mostrarAvisos();
+        toast("Hay una versión nueva de Jornal");
+      }
+    });
+  });
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (recargando) return;
+    recargando = true;
+    location.reload();
+  });
+  // Comprobar si hay novedades al abrir y cada media hora si se queda abierta
+  const buscar = () => reg.update().catch(() => {});
+  buscar();
+  setInterval(buscar, 30*60*1000);
+  window.addEventListener("focus", buscar);
+}
+
+async function buscarActualizacionManual(){
+  if (!swReg){ toast("Las actualizaciones no están disponibles aquí"); return; }
+  toast("Buscando actualizaciones…");
+  try{
+    await swReg.update();
+    setTimeout(() => {
+      if (hayActualizacion()) toast("¡Hay una versión nueva! Pulsa Actualizar");
+      else toast("Ya tienes la última versión");
+    }, 1200);
+  } catch(e){ apuntarError("buscar-update", e); toast("No se ha podido comprobar"); }
+}
+
+/** Pantalla de novedades tras actualizar */
+function mostrarNovedades(desde){
+  const vers = Object.keys(NOVEDADES)
+    .filter(v => cmpVer(v, desde) > 0)
+    .sort((a,b) => cmpVer(b,a));
+  if (!vers.length) return;
+  abrirSheet(`
+    <div style="text-align:center;margin-bottom:6px">
+      <svg viewBox="0 0 100 100" style="width:46px;height:46px">
+        <line x1="50" y1="12" x2="50" y2="38" stroke="#2A2823" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="50" cy="10" r="5" fill="#2A2823"/>
+        <path d="M50 34.5 L61.8 49.5 L59.8 60.5 L50 90.5 L40.2 60.5 L38.2 49.5 Z" fill="#B5602F"/>
+      </svg>
+    </div>
+    <h2 style="text-align:center">Jornal ${APP_VER} · Novedades</h2>
+    <p class="small muted" style="text-align:center;margin:0 0 18px">
+      Actualizada correctamente. Todas tus jornadas siguen donde estaban.</p>
+    ${vers.map(v => `
+      <div style="margin-bottom:14px">
+        ${vers.length>1 ? `<div class="tiny muted" style="margin-bottom:6px">Versión ${v}</div>`:""}
+        ${NOVEDADES[v].map(t => `<div class="row" style="align-items:flex-start;gap:9px;margin-bottom:8px">
+          <span style="color:var(--accent);flex:none;font-weight:700">·</span>
+          <span class="small" style="flex:1">${esc(t)}</span></div>`).join("")}
+      </div>`).join("")}
+    <div class="aviso info"><div>Se guardó una copia de tus datos justo antes de actualizar.
+      La tienes en Ajustes → Copias automáticas del móvil.</div></div>
+    <button class="btn" style="margin-top:14px" data-cerrar>Empezar</button>`);
+}
+/** Compara "1.10.0" vs "1.9.0" correctamente (no alfabéticamente) */
+function cmpVer(a, b){
+  const A = String(a||"0").split(".").map(Number), B = String(b||"0").split(".").map(Number);
+  for (let i=0;i<Math.max(A.length,B.length);i++){
+    const x = A[i]||0, y = B[i]||0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+
+/* ============================================================
+   Instalación en la pantalla de inicio
+   ============================================================ */
+let promptInstalar = null;   // sólo lo ofrece Chrome/Edge (Android y escritorio)
+window.addEventListener("beforeinstallprompt", ev => {
+  ev.preventDefault();
+  promptInstalar = ev;
+  if (S && S.onboarded) mostrarAvisos();
+});
+window.addEventListener("appinstalled", () => {
+  promptInstalar = null;
+  try { localStorage.setItem("jornal:instalada","1"); } catch(_){}
+  mostrarAvisos(); toast("Jornal instalada. Ábrela desde el icono 👷");
+});
+function estaInstalada(){
+  try{
+    return matchMedia("(display-mode: standalone)").matches ||
+           matchMedia("(display-mode: fullscreen)").matches ||
+           navigator.standalone === true ||
+           localStorage.getItem("jornal:instalada") === "1";
+  } catch(_){ return false; }
+}
+function plataforma(){
+  if (location.hash === "#test-ios") return "ios";
+  if (location.hash === "#test-android") return "android";
+  const ua = navigator.userAgent;
+  const iOS = /iPad|iPhone|iPod/.test(ua) ||
+              (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (iOS) return /CriOS|FxiOS|EdgiOS/.test(ua) ? "ios-otro" : "ios";
+  if (/Android/.test(ua)) return "android";
+  return "escritorio";
+}
+function ocultarInstalar(){
+  try { localStorage.setItem("jornal:instalar-visto","1"); } catch(_){}
+  mostrarAvisos();
+}
+const instalarOculto = () => { try { return localStorage.getItem("jornal:instalar-visto")==="1"; } catch(_){ return false; } };
+
+/* Iconos dibujados a mano: los del sistema no se pueden incrustar */
+const ICO_COMPARTIR = `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px"><path d="M12 15V3M12 3 8 7M12 3l4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>`;
+const ICO_MAS = `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="vertical-align:-4px"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>`;
+const ICO_MENU = `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" style="vertical-align:-4px"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>`;
+
+function pasoHTML(n, texto){
+  return `<div class="row" style="align-items:flex-start;gap:11px;margin-bottom:13px">
+    <span style="flex:none;width:23px;height:23px;border-radius:50%;background:var(--accent);color:#fff;
+      display:grid;place-items:center;font-size:12px;font-weight:700">${n}</span>
+    <span class="small" style="flex:1;padding-top:1px">${texto}</span></div>`;
+}
+async function mostrarInstalar(){
+  if (estaInstalada()){
+    abrirSheet(`<h2>Ya está instalada</h2>
+      <p class="small muted">Estás usando Jornal como aplicación. Ábrela siempre desde su icono para que
+      tus datos estén siempre disponibles, incluso sin cobertura.</p>
+      <button class="btn sec" style="margin-top:14px" data-cerrar>Cerrar</button>`);
+    return;
+  }
+  // Android y escritorio: instalación en un toque
+  if (promptInstalar){
+    try{
+      promptInstalar.prompt();
+      const r = await promptInstalar.userChoice;
+      promptInstalar = null;
+      if (r && r.outcome === "accepted"){ ocultarInstalar(); return; }
+      toast("Puedes instalarla más tarde desde Ajustes");
+      return;
+    } catch(e){ apuntarError("instalar", e); }
+  }
+  const p = plataforma();
+  let cuerpo;
+  if (p === "ios"){
+    cuerpo = `<p class="small muted" style="margin:0 0 16px">Tendrás el icono de Jornal en la pantalla de inicio,
+      se abrirá a pantalla completa y funcionará sin cobertura.</p>
+      ${pasoHTML(1, `Toca el botón <b>Compartir</b> ${ICO_COMPARTIR} de la barra de Safari (abajo en el centro).`)}
+      ${pasoHTML(2, `Desliza y elige <b>Añadir a pantalla de inicio</b> ${ICO_MAS}.`)}
+      ${pasoHTML(3, `Pulsa <b>Añadir</b> arriba a la derecha. Listo.`)}
+      <div class="aviso info" style="margin-top:6px"><div><b>Importante</b>
+        A partir de ahí abre siempre Jornal desde su icono, no desde Safari: así el iPhone
+        conserva tus datos y no los borra por falta de uso.</div></div>`;
+  } else if (p === "ios-otro"){
+    cuerpo = `<div class="aviso err"><div><b>Abre este enlace en Safari</b>
+      En el iPhone solo Safari puede instalar aplicaciones en la pantalla de inicio.
+      Copia la dirección y pégala en Safari.</div></div>
+      <button class="btn sec" style="margin-top:6px" data-acc="copiar-enlace">Copiar el enlace</button>`;
+  } else if (p === "android"){
+    cuerpo = `<p class="small muted" style="margin:0 0 16px">Tendrás el icono de Jornal en tu escritorio
+      y se abrirá como una app normal.</p>
+      ${pasoHTML(1, `Toca el menú ${ICO_MENU} arriba a la derecha de Chrome.`)}
+      ${pasoHTML(2, `Elige <b>Añadir a pantalla de inicio</b> o <b>Instalar aplicación</b>.`)}
+      ${pasoHTML(3, `Confirma con <b>Instalar</b>. Listo.`)}`;
+  } else {
+    cuerpo = `<p class="small muted" style="margin:0 0 16px">Puedes instalarla también en el ordenador.</p>
+      ${pasoHTML(1, `Busca el icono de instalar en la barra de direcciones del navegador.`)}
+      ${pasoHTML(2, `O abre el menú del navegador y elige <b>Instalar Jornal</b>.`)}
+      <p class="tiny muted">La app está pensada sobre todo para el móvil: pásate el enlace al teléfono.</p>`;
+  }
+  abrirSheet(`<h2>Instalar Jornal en tu móvil</h2>${cuerpo}
+    <div style="display:grid;gap:8px;margin-top:16px">
+      <button class="btn sec" data-cerrar>Entendido</button>
+      <button class="link" data-acc="no-instalar">No volver a avisarme</button>
+    </div>`);
+}
+
+async function compartir(){
+  const datos = { title:"Jornal — registro de horas",
+    text:"Apunta tus horas y calcula tus extras. Gratis, sin cuentas y funciona sin cobertura.",
+    url: location.href.split("#")[0] };
+  try{
+    if (navigator.share){ await navigator.share(datos); return; }
+    await navigator.clipboard.writeText(datos.url);
+    toast("Enlace copiado — pásaselo a quien quieras");
+  } catch(e){ if (e && e.name !== "AbortError") toast("Enlace: " + datos.url); }
+}
+
+/* ============================================================
+   Eventos (delegación: un solo listener para toda la app)
+   ============================================================ */
+document.addEventListener("click", async ev => {
+  const t = ev.target.closest("[data-acc],[data-tipo],[data-obra],[data-quitar],[data-editar],[data-borrar],[data-sem],[data-mes],[data-tog],[data-cfg],[data-ren],[data-renok],[data-quitobra],[data-snap],[data-cerrar],[data-onb]");
+  if (!t) return;
+  const d = t.dataset;
+  try{
+    if (d.cerrar !== undefined) return cerrarSheet();
+    if (d.onb) return onbAccion(d.onb);
+    if (d.tog !== undefined){
+      if (!S.onboarded){ onbDatos[d.tog] = !onbDatos[d.tog]; return pintarOnboarding(); }
+      return togCfg(d.tog);
+    }
+    if (d.tipo){ vTipo = d.tipo; return render(); }
+    if (d.obra !== undefined) return ponObra(obrasRecientes()[+d.obra]);
+    if (d.quitar !== undefined) return quitarParte(+d.quitar);
+    if (d.editar) return editar(d.editar);
+    if (d.borrar) return borrar(d.borrar);
+    if (d.sem){ vSemana = addDias(vSemana, +d.sem); return render(); }
+    if (d.mes){
+      const [y,m] = vMes.split("-").map(Number);
+      const nd = new Date(y, m-1 + (+d.mes), 1);
+      vMes = `${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,"0")}`;
+      return render();
+    }
+    if (d.ren !== undefined) return renombrarObra(+d.ren);
+    if (d.renok !== undefined) return confirmarRenombrar(+d.renok);
+    if (d.quitobra !== undefined) return quitarObra(+d.quitobra);
+    if (d.snap !== undefined) return restaurarSnap(+d.snap);
+    switch (d.acc){
+      case "mas": return masParte();
+      case "copiar": return copiarAnterior();
+      case "guardar": return guardarDia();
+      case "nomina": return guardarNomina();
+      case "nomina-borrar": {
+        const ok = await confirmar("¿Corregir el importe cobrado?",
+          `Se borrará el importe de ${eur(S.nominas[vMes])} que apuntaste para poder escribirlo de nuevo.`,
+          "Sí, corregir");
+        if (!ok) return;
+        delete S.nominas[vMes]; await guardar(); return render();
+      }
+      case "csv": return exportarCSV();
+      case "print": return window.print();
+      case "backup": return descargarBackup();
+      case "restaurar": return pedirRestaurar();
+      case "snapshots": return verSnapshots();
+      case "obras": return gestionarObras();
+      case "reportar": return enviarInforme();
+      case "copiar-informe": return copiarInforme();
+      case "limpiar-errores": return limpiarErrores();
+      case "compartir": return compartir();
+      case "actualizar": return aplicarActualizacion();
+      case "buscar-update": return buscarActualizacionManual();
+      case "novedades": return mostrarNovedades("0");
+      case "instalar": return mostrarInstalar();
+      case "no-instalar": ocultarInstalar(); cerrarSheet(); return toast("No se volverá a mostrar");
+      case "copiar-enlace":
+        try { await navigator.clipboard.writeText(location.href.split("#")[0]); toast("Enlace copiado"); }
+        catch(e){ toast(location.href.split("#")[0]); }
+        return;
+      case "borrar-todo": return borrarTodo();
+    }
+  } catch(e){ apuntarError("click:"+(d.acc||JSON.stringify(d)), e); toast("Algo ha fallado, revisa Ajustes"); }
+});
+
+/* Escritura en los campos: sin re-render, para no perder el foco del teclado */
+document.addEventListener("input", ev => {
+  const el = ev.target, d = el.dataset;
+  try{
+    if (d.campo !== undefined && d.i !== undefined){
+      vPartes[+d.i][d.campo] = el.value;
+      if (d.campo === "horas") refrescarPrevio();
+    }
+    else if (el.id === "notaIn") vNota = el.value;
+    else if (el.id === "ausIn"){ vAusH = el.value; refrescarPrevio(); }
+  } catch(e){ apuntarError("input", e); }
+});
+document.addEventListener("change", ev => {
+  const el = ev.target;
+  try{
+    if (el.id === "fIn"){ vFecha = el.value || hoyISO(); render(); }
+    else if (el.id === "fileIn") restaurar(el);
+    else if (el.dataset.cfg) setCfg(el.dataset.cfg, el.value);
+    else if (el.id === "pNombre"){ S.perfil.nombre = el.value.trim(); guardar(); $("#quien").textContent = S.perfil.nombre.split(" ")[0]||""; }
+    else if (el.id === "pEmpresa"){ S.perfil.empresa = el.value.trim(); guardar(); }
+  } catch(e){ apuntarError("change", e); }
+});
+
+/* ============================================================
+   Arranque
+   ============================================================ */
+function soltarSplash(){
+  const sp = $("#splash"); if (!sp) return;
+  sp.classList.add("out");
+  setTimeout(() => sp.remove(), 500);
+}
+function pintarSplash(){
+  const sp = $("#splash");
+  let rapido = false;
+  try { rapido = localStorage.getItem("jornal:splash") === hoyISO(); } catch(_){}
+  if (rapido) sp.classList.add("fast");
+  try { localStorage.setItem("jornal:splash", hoyISO()); } catch(_){}
+  setTimeout(soltarSplash, rapido ? 380 : 2000);
+}
+async function comprobarPersistencia(){
+  const el = $("#persistEstado");
+  if (el){
+    try{
+      if (navigator.storage && navigator.storage.persist){
+        let ok = await navigator.storage.persisted();
+        if (!ok) ok = await navigator.storage.persist();
+        el.textContent = ok ? "sí" : "no garantizado";
+        el.style.color = ok ? "var(--ok)" : "var(--warn)";
+      } else el.textContent = "no soportado";
+    } catch(e){ el.textContent = "no soportado"; }
+  }
+  const ns = $("#nSnap");
+  if (ns){ const s = await listarSnapshots(); ns.textContent = s.length + " guardadas"; }
+}
+
+async function iniciar(){
+  pintarSplash();
+  try { ERRORES = JSON.parse(localStorage.getItem("jornal:errores") || "[]"); } catch(_){ ERRORES = []; }
+
+  let guardado = null;
+  try { guardado = await leerDisco(); } catch(e){ apuntarError("arranque-leer", e); }
+
+  if (guardado && guardado.dias){
+    S = {...estadoNuevo(), ...guardado,
+         config:{...CFG_DEF, ...(guardado.config||{})},
+         perfil:{nombre:"",empresa:"", ...(guardado.perfil||{})}};
+    if (!S.onboarded && Object.keys(S.dias).length) S.onboarded = true;  // datos previos: no repetir el alta
+  } else {
+    S = estadoNuevo();
+    onbDatos = {...CFG_DEF};
+    ALMACEN = ALMACEN === "iniciando" ? "nuevo" : ALMACEN;
+  }
+
+  vSemana = lunes(hoyISO()); vMes = mesDe(hoyISO()); vFecha = hoyISO();
+
+  if (S.onboarded){
+    $("#app").classList.remove("hide"); $("#nav").classList.remove("hide");
+    render();
+    snapshotSemanal();
+    // ¿Venimos de una actualización? Enseñar qué ha cambiado.
+    const vista = S.verVista || "0";
+    if (cmpVer(APP_VER, vista) > 0){
+      S.verVista = APP_VER;
+      guardar();
+      if (vista !== "0") setTimeout(() => mostrarNovedades(vista), 900);
+    }
+  } else {
+    onbDatos = {...CFG_DEF, ...onbDatos};
+    pintarOnboarding();
+  }
+
+  document.querySelectorAll("nav button").forEach(b =>
+    b.addEventListener("click", () => {
+      tab = b.dataset.t; render();
+      if (tab === "ajustes") setTimeout(comprobarPersistencia, 50);
+    }));
+
+  if (navigator.storage && navigator.storage.persist)
+    navigator.storage.persist().catch(()=>{});
+}
+
+iniciar().catch(e => {
+  apuntarError("iniciar", e);
+  soltarSplash();
+  document.body.insertAdjacentHTML("afterbegin",
+    `<div style="padding:20px;font-family:sans-serif">
+       <h2 style="color:#C25E3A">Jornal no ha podido arrancar</h2>
+       <p>Cierra la app y vuelve a abrirla. Si sigue fallando, avisa al desarrollador:</p>
+       <p><a href="mailto:${EMAIL_SOPORTE}">${EMAIL_SOPORTE}</a></p></div>`);
+});
+
+/* Service worker: registro y vigilancia de actualizaciones */
+if ("serviceWorker" in navigator){
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js")
+      .then(vigilarActualizacion)
+      .catch(e => console.warn("SW no registrado:", e));
+  });
+}
+</script>
+</body>
+</html>

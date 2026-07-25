@@ -1,0 +1,10 @@
+# Copias de seguridad de datos personales: nunca deben subirse al repositorio
+*.json
+!manifest.webmanifest
+jornal-copia-*
+jornal-datos-*
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
