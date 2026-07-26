@@ -349,13 +349,19 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.7.0";
+const APP_VER = "1.8.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.8.0": [
+    "Ahora eliges qué calcula Jornal: solo obras y horas, también las extra, o además el sueldo.",
+    "Si apagas el dinero, la app deja de mostrar euros por todas partes y se queda en control de horas.",
+    "Los informes para la empresa funcionan igual en cualquiera de los tres modos.",
+    "Se cambia cuando quieras en Ajustes, sin perder nada de lo registrado."
+  ],
   "1.7.0": [
     "Los informes ya descuentan el descanso: un lunes de 8,5 h y un martes de 10,5 h salen como 18 h.",
     "El resumen enseña las horas trabajadas, el descanso restado y las horas a computar, para que se vea de dónde sale el número.",
@@ -410,10 +416,15 @@ const TIPOS = {
   vacaciones:{n:"Vacaciones"}, baja:{n:"Baja"}, festivo:{n:"Festivo"}
 };
 const CFG_DEF = {
+  calcExtras:true,            // ¿marcar las horas que pasan de la jornada?
+  calcDinero:true,            // ¿calcular además lo que se cobra? (necesita calcExtras)
   baseNeto:1400, jornada:8.5, tarifaSemana:10, tarifaSabado:13,
   descansoDia:0.5,            // lo que la empresa descuenta por descanso cada día
   finSemanaTodoExtra:true, ausenciaCuentaJornada:true
 };
+/* Atajos: el dinero depende de que se calculen las extra */
+const conExtras = () => !!(S && S.config.calcExtras);
+const conDinero = () => !!(S && S.config.calcExtras && S.config.calcDinero);
 
 /* ---------- Fechas, sin desfase de zona horaria ---------- */
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -866,6 +877,10 @@ function calcDia(fecha, dia, cfg){
   r.descanso = redondea(desc);
   r.netas = redondea(r.horas - desc);
 
+  // Quien solo quiere llevar el control de obras y horas se queda aquí:
+  // ni horas extra ni importes.
+  if (!cfg.calcExtras) return r;
+
   const computables = r.horas + (cfg.ausenciaCuentaJornada ? r.horasAus : 0);
 
   if (r.finde && cfg.finSemanaTodoExtra){
@@ -874,12 +889,12 @@ function calcDia(fecha, dia, cfg){
     // Entre semana el descanso ya va restado en la jornada, así que solo se
     // avisa de él los fines de semana, que es donde recorta lo que se cobra.
     r.noComputada = r.descanso;
-    r.importe = redondea(r.extraPagada * cfg.tarifaSabado);
   } else {
     r.extra = Math.max(0, redondea(computables - cfg.jornada));
     r.extraPagada = r.extra;
-    r.importe = redondea(r.extra * (r.finde ? cfg.tarifaSabado : cfg.tarifaSemana));
   }
+  if (cfg.calcDinero)
+    r.importe = redondea(r.extraPagada * (r.finde ? cfg.tarifaSabado : cfg.tarifaSemana));
   return r;
 }
 function calcSemana(lun){
@@ -1029,7 +1044,10 @@ function deltaHTML(a,p,unidad,invertir){
   const d = redondea(a-p);
   if (Math.abs(d) < 0.005) return `<span class="delta same">= igual</span>`;
   const sube = d>0, bueno = invertir ? !sube : sube;
-  return `<span class="delta ${bueno?"up":"down"}">${sube?"▲":"▼"} ${unidad==="€"?eur(Math.abs(d)):num(Math.abs(d))+" h"}</span>`;
+  const v = unidad === "€" ? eur(Math.abs(d))
+          : unidad === ""  ? num(Math.abs(d))
+          : num(Math.abs(d)) + " h";
+  return `<span class="delta ${bueno?"up":"down"}">${sube?"▲":"▼"} ${v}</span>`;
 }
 
 /* ============================================================
@@ -1053,20 +1071,44 @@ function pintarOnboarding(){
       <div class="grupo">
         <label for="o-empresa">Empresa <span class="muted" style="font-weight:400">(opcional)</span></label>
         <input id="o-empresa" type="text" value="${esc(c.empresa||"")}" placeholder="Nombre de la empresa" autocapitalize="words">
+      </div>
+      <div class="grupo" style="border-top:1px solid var(--line);padding-top:15px;margin-top:20px">
+        <label style="margin-bottom:8px">¿Qué quieres que haga Jornal?</label>
+        ${[["soloHoras","Solo llevar el control",
+            "Obras, horas y poder mandar el informe. Sin números de dinero."],
+           ["conExtras","Controlar también mis horas extra",
+            "Marca las horas que pasan de tu jornada, pero sin calcular importes."],
+           ["conDinero","Calcular también lo que cobro",
+            "Suma tu nómina base y lo que te toca por las extras."]
+          ].map(([v,t,ay]) => {
+            const sel = v === "conDinero" ? (c.calcExtras !== false && c.calcDinero !== false)
+                      : v === "conExtras" ? (c.calcExtras !== false && c.calcDinero === false)
+                      : c.calcExtras === false;
+            return `<button class="chip" data-modo="${v}" style="display:block;width:100%;text-align:left;
+              border-radius:11px;padding:11px 13px;margin-bottom:7px;font-family:var(--sans);white-space:normal;
+              ${sel?"background:var(--accent);color:#fff;border-color:var(--accent)":""}">
+              <span style="font-weight:600;font-size:14px">${t}</span><br>
+              <span style="font-size:12px;opacity:.8">${ay}</span></button>`;
+          }).join("")}
       </div>`,
-    () => `<h2>Tu nómina</h2>
+    () => `<h2>${c.calcDinero === false ? "Tu jornada" : "Tu nómina"}</h2>
+      ${c.calcDinero === false ? "" : `
       <div class="grupo">
         <label for="o-base">Nómina que te ingresan en el banco (€/mes)</label>
         <div class="ayuda">El importe fijo que cobras cada mes sin contar horas extra.</div>
         <input id="o-base" type="number" step="0.01" min="0" inputmode="decimal" class="mono"
                value="${c.baseNeto ?? ""}" placeholder="1400" style="text-align:right">
-      </div>
+      </div>`}
+      ${c.calcExtras === false ? `
+      <p class="small muted">Solo necesitamos saber cuánto descanso te descuentan al día, para que los
+        informes salgan con las horas que de verdad te computan.</p>` : `
       <div class="grupo">
         <label for="o-jornada">Tu jornada normal (horas al día)</label>
         <div class="ayuda">A partir de aquí, todo lo que trabajes de lunes a viernes cuenta como hora extra.</div>
         <input id="o-jornada" type="number" step="0.5" min="0" max="24" inputmode="decimal" class="mono"
                value="${c.jornada ?? ""}" placeholder="8.5" style="text-align:right">
-      </div>
+      </div>`}
+      ${c.calcDinero === false ? "" : `
       <div class="grupo">
         <label for="o-tsem">Precio de la hora extra de lunes a viernes (€)</label>
         <input id="o-tsem" type="number" step="0.01" min="0" inputmode="decimal" class="mono"
@@ -1076,16 +1118,24 @@ function pintarOnboarding(){
         <label for="o-tsab">Precio de la hora de sábado o domingo (€)</label>
         <input id="o-tsab" type="number" step="0.01" min="0" inputmode="decimal" class="mono"
                value="${c.tarifaSabado ?? ""}" placeholder="13" style="text-align:right">
-      </div>`,
-    () => `<h2>Cómo te pagan el fin de semana</h2>
-      <p class="small muted" style="margin:0 0 16px">Cada empresa lo hace distinto. Marca lo que se ajuste a la tuya.</p>
+      </div>`}
       <div class="grupo">
         <label for="o-desc">Descanso que te descuentan cada día (horas)</label>
         <div class="ayuda">Muchas empresas restan el rato del bocadillo a cada jornada: si trabajas
-          8,5 h te pagan 8. Pon 0 si a ti no te lo descuentan.</div>
+          8,5 h te computan 8. Pon 0 si a ti no te lo descuentan.</div>
         <input id="o-desc" type="number" step="0.25" min="0" max="4" inputmode="decimal" class="mono"
                value="${c.descansoDia ?? ""}" placeholder="0.5" style="text-align:right">
-      </div>
+      </div>`,
+    () => c.calcExtras === false ? `<h2>Todo listo</h2>
+      <p class="small muted">Jornal va a llevarte el control de las obras y las horas que dedicas a cada una.</p>
+      <div class="aviso info" style="margin-top:16px"><div>
+        <b>Lo que podrás hacer</b>
+        Apuntar cada jornada con sus obras, ver el resumen de la semana y del mes, y generar el
+        informe para la empresa en PDF o Excel.<br><br>
+        Si más adelante quieres que calcule también tus horas extra o tu sueldo, se activa en Ajustes.
+      </div></div>`
+      : `<h2>Cómo te pagan el fin de semana</h2>
+      <p class="small muted" style="margin:0 0 16px">Cada empresa lo hace distinto. Marca lo que se ajuste a la tuya.</p>
       ${[["finSemanaTodoExtra","Todas las horas del sábado y domingo son extra",
           "Si lo dejas en NO, el fin de semana funciona como un día normal y solo cuentan las horas por encima de tu jornada."],
          ["ausenciaCuentaJornada","El médico y los permisos cuentan como jornada",
@@ -1100,6 +1150,7 @@ function pintarOnboarding(){
             <button class="chip ${c[k]?"on":""}" style="flex:none" data-tog="${k}">${c[k]?"Sí":"No"}</button>
           </div>
         </div>`).join("")}
+      ${c.calcDinero === false ? "" : `
       <div class="aviso info" style="margin-top:16px">
         <div><b>Ejemplo con lo que has puesto</b>
         ${(() => {
@@ -1110,7 +1161,7 @@ function pintarOnboarding(){
                  ` de ellas ${num(lu.extraPagada)} h extra = ${eur(lu.importe)}<br>` +
                  `Un sábado de 8,5 h → <b style="display:inline">${num(sa.netas)} h = ${eur(sa.importe)}</b>`;
         })()}</div>
-      </div>`
+      </div>`}`
   ];
   $("#onb").innerHTML = `
     <div class="row" style="gap:9px;margin-bottom:18px">
@@ -1138,14 +1189,15 @@ function leerPasoOnb(){
     onbDatos.empresa = (v("#o-empresa")||"").trim();
   } else if (onbPaso === 1){
     const n = (x,d) => { const y = Number(x); return isFinite(y) && y >= 0 && x !== "" ? y : d; };
-    onbDatos.baseNeto     = n(v("#o-base"),     CFG_DEF.baseNeto);
-    onbDatos.jornada      = n(v("#o-jornada"),  CFG_DEF.jornada);
-    onbDatos.tarifaSemana = n(v("#o-tsem"),     CFG_DEF.tarifaSemana);
-    onbDatos.tarifaSabado = n(v("#o-tsab"),     CFG_DEF.tarifaSabado);
+    if ($("#o-base"))    onbDatos.baseNeto     = n(v("#o-base"),    CFG_DEF.baseNeto);
+    if ($("#o-jornada")) onbDatos.jornada      = n(v("#o-jornada"), CFG_DEF.jornada);
+    if ($("#o-tsem"))    onbDatos.tarifaSemana = n(v("#o-tsem"),    CFG_DEF.tarifaSemana);
+    if ($("#o-tsab"))    onbDatos.tarifaSabado = n(v("#o-tsab"),    CFG_DEF.tarifaSabado);
+    if ($("#o-desc")){
+      const d = Number(v("#o-desc"));
+      if (isFinite(d) && d >= 0 && d <= 4) onbDatos.descansoDia = d;
+    }
     if (onbDatos.jornada > 24) onbDatos.jornada = CFG_DEF.jornada;
-  } else if (onbPaso === 2){
-    const d = Number(v("#o-desc"));
-    if (isFinite(d) && d >= 0 && d <= 4) onbDatos.descansoDia = d;
   }
 }
 async function onbAccion(a){
@@ -1157,7 +1209,7 @@ async function onbAccion(a){
   }
   // Finalizar
   S.perfil = { nombre: onbDatos.nombre || "", empresa: onbDatos.empresa || "" };
-  ["baseNeto","jornada","tarifaSemana","tarifaSabado","descansoDia",
+  ["baseNeto","jornada","tarifaSemana","tarifaSabado","descansoDia","calcExtras","calcDinero",
    "finSemanaTodoExtra","ausenciaCuentaJornada"].forEach(k => {
     if (onbDatos[k] !== undefined) S.config[k] = onbDatos[k];
   });
@@ -1229,15 +1281,7 @@ function vistaHoy(){
   const cfg = S.config, mes = calcMes(mesDe(hoyISO())), yaHay = S.dias[vFecha];
   const recientes = obrasRecientes();
   return `
-  <div class="hero">
-    <div class="lbl">Sueldo de ${MESES[+mesDe(hoyISO()).slice(5)-1]}</div>
-    <div class="big">${eur(mes.total)}</div>
-    <div class="grid">
-      <div><b>${eur(cfg.baseNeto)}</b>base</div>
-      <div><b>${eur(mes.importeExtra)}</b>extras</div>
-      <div><b>${num(mes.extraPagada)} h</b>extra</div>
-    </div>
-  </div>
+  ${heroMes(mes, MESES[+mesDe(hoyISO()).slice(5)-1])}
 
   <div class="card">
     <h2>Nueva jornada</h2>
@@ -1291,6 +1335,39 @@ function vistaHoy(){
 
   ${listaDias(fechasOrdenadas().slice(0,10), "Últimas jornadas")}`;
 }
+/**
+ * Cabecera del mes. Enseña dinero, horas extra o solo horas según lo que
+ * cada persona haya elegido que calcule la app.
+ */
+function heroMes(mes, nombreMes){
+  if (conDinero())
+    return `<div class="hero">
+      <div class="lbl">Sueldo de ${nombreMes}</div>
+      <div class="big">${eur(mes.total)}</div>
+      <div class="grid">
+        <div><b>${eur(S.config.baseNeto)}</b>base</div>
+        <div><b>${eur(mes.importeExtra)}</b>extras</div>
+        <div><b>${num(mes.extraPagada)} h</b>extra</div>
+      </div></div>`;
+  if (conExtras())
+    return `<div class="hero">
+      <div class="lbl">Horas de ${nombreMes}</div>
+      <div class="big">${num(mes.horas)} h</div>
+      <div class="grid">
+        <div><b>${num(mes.ordinarias)} h</b>ordinarias</div>
+        <div><b>${num(mes.extraPagada)} h</b>extra</div>
+        <div><b>${mes.diasTrab}</b>días</div>
+      </div></div>`;
+  return `<div class="hero">
+    <div class="lbl">Horas de ${nombreMes}</div>
+    <div class="big">${num(mes.horas)} h</div>
+    <div class="grid">
+      <div><b>${num(mes.netas)} h</b>a computar</div>
+      <div><b>${mes.diasTrab}</b>días</div>
+      <div><b>${Object.keys(mes.porObra).length}</b>obras</div>
+    </div></div>`;
+}
+
 /** Resumen en vivo del día que se está tecleando */
 function previoHTML(){
   const p = calcDia(vFecha, {
@@ -1301,11 +1378,11 @@ function previoHTML(){
   if (p.horas <= 0) return "";
   return `<div style="background:var(--band);border-radius:10px;padding:11px;margin-bottom:12px" class="small">
     <div class="between"><span>Total del día</span><b class="mono">${num(p.horas)} h</b></div>
+    ${p.descanso>0 ? `<div class="between muted">
+      <span>A computar (menos descanso)</span><b class="mono">${num(p.netas)} h</b></div>` : ""}
     ${p.extra>0 ? `<div class="between" style="color:var(--accent);font-weight:600">
       <span>Horas extra${p.finde?" (fin de semana)":""}</span>
-      <b class="mono">${num(p.extraPagada)} h · ${eur(p.importe)}</b></div>` : ""}
-    ${p.noComputada>0 ? `<div class="between" style="color:var(--warn)">
-      <span>No computadas</span><b class="mono">${num(p.noComputada)} h</b></div>` : ""}
+      <b class="mono">${num(p.extraPagada)} h${conDinero()?` · ${eur(p.importe)}`:""}</b></div>` : ""}
   </div>`;
 }
 function refrescarPrevio(){
@@ -1325,7 +1402,7 @@ function listaDias(fechas, titulo){
           ${c.tipo!=="trabajo" ? `<span class="badge aus">${TIPOS[c.tipo].n}</span>`:""}
           ${raro ? `<span class="badge warn">revisar</span>`:""}</div>
         <div class="h">${num(c.horas)}h${
-          c.extra>0 ? `<br><b>${num(c.extraPagada)}h extra · ${eur(c.importe)}</b>`:""}${
+          c.extra>0 ? `<br><b>${num(c.extraPagada)}h extra${conDinero()?` · ${eur(c.importe)}`:""}</b>`:""}${
           c.noComputada>0 ? `<br><span style="color:var(--warn)">${num(c.noComputada)}h de descanso</span>`:""}</div>
       </div>
       ${c.horasAus>0 ? `<div class="p"><span class="muted">${TIPOS[c.tipo].n}</span><span class="hh">${num(c.horasAus)}h</span></div>`:""}
@@ -1354,11 +1431,12 @@ function vistaSemana(){
     <button class="btn ghost" style="width:auto;padding:9px 15px" data-sem="7" ${esActual?"disabled":""} aria-label="Semana siguiente">→</button>
   </div>
   <div class="hero">
-    <div class="lbl">Generado esta semana en extras</div>
-    <div class="big">${eur(a.importe)}</div>
+    <div class="lbl">${conDinero() ? "Generado esta semana en extras" : "Horas de esta semana"}</div>
+    <div class="big">${conDinero() ? eur(a.importe) : num(a.horas) + " h"}</div>
     <div class="grid">
-      <div><b>${num(a.horas)} h</b>trabajadas</div>
-      <div><b>${num(a.extraPagada)} h</b>extra</div>
+      ${conDinero() ? `<div><b>${num(a.horas)} h</b>trabajadas</div>` : `<div><b>${num(a.netas)} h</b>a computar</div>`}
+      ${conExtras() ? `<div><b>${num(a.extraPagada)} h</b>extra</div>`
+                    : `<div><b>${num(a.descanso)} h</b>descanso</div>`}
       <div><b>${a.diasTrab}</b>días</div>
     </div>
   </div>
@@ -1366,19 +1444,22 @@ function vistaSemana(){
     <h2>Reparto por día</h2>
     ${grafico(a)}
     <div class="row tiny muted" style="gap:14px;justify-content:center;margin-top:6px">
-      <span><i style="display:inline-block;width:9px;height:9px;background:#2A2823;border-radius:2px;margin-right:4px"></i>ordinarias</span>
-      <span><i style="display:inline-block;width:9px;height:9px;background:#B5602F;border-radius:2px;margin-right:4px"></i>extra</span>
-      <span><i style="display:inline-block;width:9px;height:9px;background:#8A6A4A;opacity:.45;border-radius:2px;margin-right:4px"></i>ausencia</span>
+      <span><i style="display:inline-block;width:9px;height:9px;background:#2A2823;border-radius:2px;margin-right:4px"></i>${conExtras()?"ordinarias":"trabajadas"}</span>
+      ${conExtras()?`<span><i style="display:inline-block;width:9px;height:9px;background:#B5602F;border-radius:2px;margin-right:4px"></i>extra</span>`:""}
+      ${a.horasAus>0?`<span><i style="display:inline-block;width:9px;height:9px;background:#8A6A4A;opacity:.45;border-radius:2px;margin-right:4px"></i>ausencia</span>`:""}
     </div>
   </div>
   <div class="card">
     <h2>Comparativa con la semana anterior</h2>
     <div class="stat"><span>Horas trabajadas</span><span><b>${num(a.horas)}</b> ${deltaHTML(a.horas,p.horas,"h")}</span></div>
+    <div class="stat"><span>A computar (menos descanso)</span><span><b>${num(a.netas)}</b> ${deltaHTML(a.netas,p.netas,"h")}</span></div>
+    ${conExtras() ? `
     <div class="stat"><span>De ellas, ordinarias</span><span><b>${num(a.ordinarias)}</b> ${deltaHTML(a.ordinarias,p.ordinarias,"h")}</span></div>
-    <div class="stat"><span>Horas extra pagadas</span><span><b>${num(a.extraPagada)}</b> ${deltaHTML(a.extraPagada,p.extraPagada,"h")}</span></div>
-    <div class="stat"><span>Importe en extras</span><span><b>${eur(a.importe)}</b> ${deltaHTML(a.importe,p.importe,"€")}</span></div>
-    ${(a.noComputada||p.noComputada) ? `<div class="stat"><span class="muted">Horas no computadas</span><span><b style="color:var(--warn)">${num(a.noComputada)}</b> ${deltaHTML(a.noComputada,p.noComputada,"h",true)}</span></div>`:""}
-    <div class="tiny muted" style="margin-top:9px">Semana anterior: ${num(p.horas)} h · ${eur(p.importe)} en extras</div>
+    <div class="stat"><span>Horas extra</span><span><b>${num(a.extraPagada)}</b> ${deltaHTML(a.extraPagada,p.extraPagada,"h")}</span></div>`:""}
+    ${conDinero() ? `
+    <div class="stat"><span>Importe en extras</span><span><b>${eur(a.importe)}</b> ${deltaHTML(a.importe,p.importe,"€")}</span></div>`:""}
+    <div class="stat"><span>Días trabajados</span><span><b>${a.diasTrab}</b> ${deltaHTML(a.diasTrab,p.diasTrab,"")}</span></div>
+    <div class="tiny muted" style="margin-top:9px">Semana anterior: ${num(p.horas)} h${conDinero()?` · ${eur(p.importe)} en extras`:""}</div>
   </div>
   ${aus.length ? `<div class="card"><h2>Ausencias</h2>
     ${aus.map(([k,v]) => `<div class="stat"><span>${TIPOS[k].n}</span><b>${v} ${v===1?"día":"días"}</b></div>`).join("")}
@@ -1406,22 +1487,16 @@ function vistaMes(){
     </div>
     <button class="btn ghost" style="width:auto;padding:9px 15px" data-mes="1" ${esActual?"disabled":""} aria-label="Mes siguiente">→</button>
   </div>
-  <div class="hero">
-    <div class="lbl">${esActual?"Llevas acumulado":"Total del mes"}</div>
-    <div class="big">${eur(a.total)}</div>
-    <div class="grid">
-      <div><b>${eur(S.config.baseNeto)}</b>base</div>
-      <div><b>${eur(a.importeExtra)}</b>extras</div>
-      <div><b>${num(a.horas)} h</b>trabajadas</div>
-    </div>
-  </div>
+  ${heroMes(a, MESES[m-1])}
+
+  ${conDinero() ? `
   <div class="card">
     <h2>Desglose</h2>
     <div class="stat"><span>Salario base</span><b>${eur(S.config.baseNeto)}</b></div>
     <div class="stat"><span>Extra entre semana <span class="muted tiny">${num(extraTipo(a,false))} h × ${eur(S.config.tarifaSemana)}</span></span><b>${eur(importeTipo(a,false))}</b></div>
     <div class="stat"><span>Extra fin de semana <span class="muted tiny">${num(extraTipo(a,true))} h × ${eur(S.config.tarifaSabado)}</span></span><b>${eur(importeTipo(a,true))}</b></div>
     <div class="stat tot"><span>Total a cobrar</span><b>${eur(a.total)}</b></div>
-    ${a.noComputada>0 ? `<div class="tiny" style="color:var(--warn);margin-top:9px">⚠ ${num(a.noComputada)} h trabajadas en fin de semana que no se computan por el redondeo a horas completas.</div>`:""}
+    ${a.noComputada>0 ? `<div class="tiny" style="color:var(--warn);margin-top:9px">⚠ ${num(a.noComputada)} h de fin de semana que no se computan: son el descanso que descuenta la empresa.</div>`:""}
   </div>
   <div class="card">
     <h2>Verificación de nómina</h2>
@@ -1437,7 +1512,15 @@ function vistaMes(){
         <b style="color:${dif<0?"var(--warn)":"var(--ok)"}">${dif===0?"✓ 0,00 €":eur(Math.abs(dif))}</b></div>
       ${dif<0 && S.config.tarifaSemana>0 ? `<div class="tiny" style="color:var(--warn);margin-top:9px">Equivale a ${num(Math.abs(dif)/S.config.tarifaSemana)} h extra entre semana sin pagar.</div>`:""}
       <button class="link" style="margin-top:10px" data-acc="nomina-borrar">Corregir importe</button>`}
-  </div>
+  </div>` : `
+  <div class="card">
+    <h2>Resumen del mes</h2>
+    <div class="stat"><span>Horas trabajadas</span><b>${num(a.horas)} h</b></div>
+    ${a.descanso>0 ? `<div class="stat"><span>Descanso descontado</span><b>&minus; ${num(a.descanso)} h</b></div>`:""}
+    <div class="stat tot"><span>Horas a computar</span><b>${num(a.netas)} h</b></div>
+    ${conExtras() ? `<div class="stat"><span class="muted">De ellas, horas extra</span><b>${num(a.extraPagada)} h</b></div>`:""}
+    <div class="stat"><span class="muted">Días trabajados</span><b>${a.diasTrab}</b></div>
+  </div>`}
   ${obras.length ? `<div class="card"><h2>Horas por obra</h2>
     ${obras.map(([o,h]) => `<div class="stat"><span>${esc(o)}</span><b>${num(h)} h</b></div>`).join("")}</div>`:""}
   ${Object.keys(a.ausencias).length ? `<div class="card"><h2>Ausencias del mes</h2>
@@ -1451,11 +1534,16 @@ function vistaMes(){
 /* ---------- AJUSTES ---------- */
 function vistaAjustes(){
   const c = S.config;
-  const campos = [["baseNeto","Nómina base (€/mes)","0.01"],["jornada","Jornada ordinaria (h/día)","0.5"],
-                  ["descansoDia","Descanso descontado (h/día)","0.25"],
-                  ["tarifaSemana","€ hora extra L-V","0.01"],["tarifaSabado","€ hora sáb/dom","0.01"]];
-  const flags = [["finSemanaTodoExtra","Fin de semana: todas las horas son extra"],
-                 ["ausenciaCuentaJornada","Médico y permisos cuentan como jornada"]];
+  const campos = [
+    ["descansoDia","Descanso descontado (h/día)","0.25", true],
+    ["jornada","Jornada ordinaria (h/día)","0.5", conExtras()],
+    ["baseNeto","Nómina base (€/mes)","0.01", conDinero()],
+    ["tarifaSemana","€ hora extra L-V","0.01", conDinero()],
+    ["tarifaSabado","€ hora sáb/dom","0.01", conDinero()]
+  ].filter(x => x[3]);
+  const flags = [["finSemanaTodoExtra","Fin de semana: todas las horas son extra", conExtras()],
+                 ["ausenciaCuentaJornada","Médico y permisos cuentan como jornada", conExtras()]]
+                .filter(x => x[2]);
   const ej = calcDia(sabadoEjemplo(), {partes:[{obra:"x",horas:8.5}],tipo:"trabajo"}, c);
   const ejL = calcDia(lunes(hoyISO()), {partes:[{obra:"x",horas:10.5}],tipo:"trabajo"}, c);
   return `
@@ -1468,16 +1556,40 @@ function vistaAjustes(){
   </div>
 
   <div class="card">
-    <h2>Tarifas</h2>
+    <h2>Qué quieres que calcule Jornal</h2>
+    <div class="between" style="align-items:flex-start;padding:9px 0;border-bottom:1px solid #F2EDE0">
+      <div style="flex:1;padding-right:10px">
+        <div class="small" style="font-weight:600">Horas extra</div>
+        <div class="tiny muted">Marca las horas que pasan de tu jornada.</div>
+      </div>
+      <button class="chip ${c.calcExtras?"on":""}" style="flex:none" data-tog="calcExtras">${c.calcExtras?"Sí":"No"}</button>
+    </div>
+    <div class="between" style="align-items:flex-start;padding:9px 0">
+      <div style="flex:1;padding-right:10px">
+        <div class="small" style="font-weight:600${c.calcExtras?"":";opacity:.45"}">Sueldo e importes</div>
+        <div class="tiny muted"${c.calcExtras?"":' style="opacity:.45"'}>Calcula lo que te toca cobrar.
+          ${c.calcExtras?"":"Necesita tener activadas las horas extra."}</div>
+      </div>
+      <button class="chip ${conDinero()?"on":""}" style="flex:none${c.calcExtras?"":";opacity:.45"}"
+              data-tog="calcDinero">${conDinero()?"Sí":"No"}</button>
+    </div>
+    ${!conExtras() ? `<p class="tiny muted" style="margin:10px 0 0">Jornal lleva solo el control de obras
+      y horas. Los informes para la empresa funcionan igual.</p>` : ""}
+  </div>
+
+  <div class="card">
+    <h2>${conDinero() ? "Tarifas y jornada" : "Jornada"}</h2>
     ${campos.map(([k,l,st]) => `
       <div class="between" style="padding:7px 0">
         <label class="small" style="flex:1" for="cfg-${k}">${l}</label>
         <input id="cfg-${k}" type="number" step="${st}" min="0" inputmode="decimal" value="${c[k]}" class="mono"
                style="width:106px;text-align:right;flex:none" data-cfg="${k}">
       </div>`).join("")}
+    <p class="tiny muted" style="margin:8px 0 0">El descanso se descuenta de cada día trabajado en los
+      informes, igual que hace tu empresa.</p>
   </div>
 
-  <div class="card">
+  ${flags.length ? `<div class="card">
     <h2>Reglas de cálculo</h2>
     ${flags.map(([k,l]) => `
       <div class="between" style="padding:9px 0;border-bottom:1px solid #F2EDE0">
@@ -1485,10 +1597,9 @@ function vistaAjustes(){
         <button class="chip ${c[k]?"on":""}" style="flex:none" data-tog="${k}">${c[k]?"Sí":"No"}</button>
       </div>`).join("")}
     <p class="tiny muted" style="margin:10px 0 0">Con tu configuración:<br>
-      · Un <b>lunes de 10,5 h</b> → se pagan <b>${num(ejL.netas)} h</b>, de ellas <b>${num(ejL.extraPagada)} h extra</b> = ${eur(ejL.importe)}<br>
-      · Un <b>sábado de 8,5 h</b> → se pagan <b>${num(ej.netas)} h</b> a ${eur(c.tarifaSabado)} = <b>${eur(ej.importe)}</b><br>
-      El descanso de ${num(c.descansoDia)} h se descuenta de cada día trabajado, igual que hace tu empresa.</p>
-  </div>
+      · Un <b>lunes de 10,5 h</b> → ${num(ejL.netas)} h a computar, de ellas <b>${num(ejL.extraPagada)} h extra</b>${conDinero()?` = ${eur(ejL.importe)}`:""}<br>
+      · Un <b>sábado de 8,5 h</b> → <b>${num(ej.netas)} h</b>${conDinero()?` a ${eur(c.tarifaSabado)} = <b>${eur(ej.importe)}</b>`:" extra"}</p>
+  </div>` : ""}
 
   <div class="card">
     <h2>Copias de seguridad</h2>
@@ -1641,7 +1752,16 @@ async function setCfg(k,v){
   if (!isFinite(n) || n < 0 || (k==="jornada" && n > 24)){ toast("Valor no válido"); render(); return; }
   S.config[k] = n; invalidar(); await guardar(); render(); toast("Ajuste guardado");
 }
-async function togCfg(k){ S.config[k] = !S.config[k]; invalidar(); await guardar(); render(); }
+async function togCfg(k){
+  S.config[k] = !S.config[k];
+  // El dinero sale de las horas extra: si se apagan, se apaga también.
+  // Y si alguien enciende el dinero, se encienden las extra por su cuenta.
+  if (k === "calcExtras" && !S.config.calcExtras) S.config.calcDinero = false;
+  if (k === "calcDinero" && S.config.calcDinero)  S.config.calcExtras = true;
+  invalidar(); await guardar(); render();
+  if (k === "calcExtras")
+    toast(S.config.calcExtras ? "Jornal vuelve a calcular tus extras" : "Solo control de obras y horas");
+}
 async function guardarNomina(){
   const v = Number($("#nomIn").value);
   if (!isFinite(v) || v <= 0){ toast("Escribe el importe cobrado"); return; }
@@ -1789,6 +1909,7 @@ function mesAnterior(m){
 function abrirExportar(desde, hasta){
   expDesde = desde || lunes(hoyISO());
   expHasta = hasta || addDias(expDesde, 6);
+  if (!conDinero()) EXP.importes = false;   // sin dinero configurado no hay importes que incluir
   pintarExportar();
 }
 function pintarExportar(){
@@ -1823,13 +1944,13 @@ function pintarExportar(){
         `El total de cada día sale ya con el descanso restado, que es como lo computa la empresa. ` +
         `Un lunes de 8,5 h y un martes de 10,5 h salen como ${num(8.5 - S.config.descansoDia)} + ${num(10.5 - S.config.descansoDia)} = ` +
         `<b>${num(19 - 2*S.config.descansoDia)} h</b>.`],
-       ["importes","Incluir precios e importes",
-        "Desactivado, el informe solo muestra horas. Es lo habitual para mandarlo a la empresa."],
        ["porObra","Resumen por obra",
         "Una tabla con el total de horas dedicadas a cada obra."],
        ["detalle","Detalle día a día",
         "Cada jornada con sus obras y sus horas."]
-      ].map(([k,l,ayuda]) => `
+      ].concat(conDinero() ? [["importes","Incluir precios e importes",
+        "Desactivado, el informe solo muestra horas. Es lo habitual para mandarlo a la empresa."]] : [])
+       .map(([k,l,ayuda]) => `
       <div class="between" style="align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)">
         <div style="flex:1;padding-right:10px">
           <div class="small" style="font-weight:600">${l}</div>
@@ -3052,7 +3173,7 @@ async function compartir(){
    Eventos (delegación: un solo listener para toda la app)
    ============================================================ */
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-acc],[data-tipo],[data-obra],[data-quitar],[data-editar],[data-borrar],[data-sem],[data-mes],[data-tog],[data-cfg],[data-ren],[data-renok],[data-quitobra],[data-snap],[data-cerrar],[data-onb],[data-rango],[data-expcfg]");
+  const t = ev.target.closest("[data-acc],[data-tipo],[data-obra],[data-quitar],[data-editar],[data-borrar],[data-sem],[data-mes],[data-tog],[data-cfg],[data-ren],[data-renok],[data-quitobra],[data-snap],[data-cerrar],[data-onb],[data-rango],[data-expcfg],[data-modo]");
   if (!t) return;
   const d = t.dataset;
   try{
@@ -3076,6 +3197,12 @@ document.addEventListener("click", async ev => {
     }
     if (d.ren !== undefined) return renombrarObra(+d.ren);
     if (d.renok !== undefined) return confirmarRenombrar(+d.renok);
+    if (d.modo){
+      leerPasoOnb();
+      onbDatos.calcExtras = d.modo !== "soloHoras";
+      onbDatos.calcDinero = d.modo === "conDinero";
+      return pintarOnboarding();
+    }
     if (d.rango){ const [a,b] = d.rango.split("|"); expDesde = a; expHasta = b; return pintarExportar(); }
     if (d.expcfg){ EXP[d.expcfg] = !EXP[d.expcfg]; return pintarExportar(); }
     if (d.quitobra !== undefined) return quitarObra(+d.quitobra);
