@@ -349,13 +349,19 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.8.0";
+const APP_VER = "1.8.1";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.8.1": [
+    "Arreglado el fallo del iPhone: al cerrar y volver a abrir la app, la base de datos se quedaba colgada.",
+    "Si la base de datos falla, ahora se reabre sola y lo reintenta.",
+    "Las copias automáticas ya no se pierden: si falla la base de datos, se guarda una de respaldo.",
+    "En Ajustes puedes ver si la base de datos del móvil está funcionando."
+  ],
   "1.8.0": [
     "Ahora eliges qué calcula Jornal: solo obras y horas, también las extra, o además el sueldo.",
     "Si apagas el dinero, la app deja de mostrar euros por todas partes y se queda en control de horas.",
@@ -732,43 +738,108 @@ async function limpiarErrores(){
    Almacenamiento: IndexedDB + espejo en localStorage
    ============================================================ */
 const DB_NAME="jornal", STORE="kv", KEY="estado", KEY_SNAP="snapshots", LS_KEY="jornal:estado";
-let _db = null, ALMACEN = "iniciando";
+let _db = null, _abriendo = null, ALMACEN = "iniciando";
+
+/** Suelta la conexión guardada. La siguiente operación abrirá una nueva. */
+function cerrarDB(){
+  if (_db){ try { _db.close(); } catch(_){} }
+  _db = null; _abriendo = null;
+}
 
 function abrirDB(){
-  return new Promise(res => {
-    if (_db) return res(_db);
+  if (_db) return Promise.resolve(_db);
+  if (_abriendo) return _abriendo;             // no abrir dos veces a la vez
+  _abriendo = new Promise(res => {
     let req;
     try { req = indexedDB.open(DB_NAME,1); }
-    catch(e){ apuntarError("idb-open", e); return res(null); }
+    catch(e){ apuntarError("idb-open", e); _abriendo = null; return res(null); }
     let hecho = false;
-    const fin = v => { if (!hecho){ hecho = true; res(v); } };
+    const fin = v => { if (!hecho){ hecho = true; _abriendo = null; res(v); } };
     req.onupgradeneeded = () => { try{ req.result.createObjectStore(STORE); }catch(e){ apuntarError("idb-upgrade", e); } };
-    req.onsuccess = () => { _db = req.result;
-      _db.onversionchange = () => { try{ _db.close(); }catch(_){} _db = null; };
-      fin(_db); };
+    req.onsuccess = () => {
+      _db = req.result;
+      _db.onversionchange = () => cerrarDB();
+      // Safari cierra la conexión por su cuenta al suspender la app: hay que
+      // enterarse para no seguir usando una conexión muerta.
+      _db.onclose = () => { _db = null; _abriendo = null; };
+      fin(_db);
+    };
     req.onerror = () => { apuntarError("idb-open", req.error); fin(null); };
     req.onblocked = () => fin(null);
     setTimeout(() => fin(_db), 3000);   // el arranque nunca se queda colgado
   });
+  return _abriendo;
 }
+
+/** ¿El error viene de una conexión muerta y merece reintentar? */
+function conexionMuerta(e){
+  const t = String((e && (e.name + " " + e.message)) || e);
+  return /closing|closed|InvalidStateError|TransactionInactive|NotFoundError|AbortError/i.test(t);
+}
+
+let idbCaido = false;   // para no llenar el registro de fallos con lo mismo
+
+/**
+ * Ejecuta algo contra IndexedDB. Si la conexión estaba muerta (iOS la mata al
+ * suspender la app), la reabre y lo reintenta una vez antes de rendirse.
+ *
+ * Si no hay base de datos LANZA un error en vez de devolver null: quien llama
+ * tiene que enterarse y tirar del respaldo. Devolver null en silencio hacía que
+ * la app diese por guardado algo que no se había guardado.
+ */
+async function conDB(fn, reintento){
+  const db = await abrirDB();
+  if (!db){
+    const e = new Error("IndexedDB no disponible");
+    e.sinBD = true;
+    throw e;
+  }
+  try {
+    const r = await fn(db);
+    idbCaido = false;
+    return r;
+  } catch(e){
+    if (!reintento && conexionMuerta(e)){
+      cerrarDB();
+      return conDB(fn, true);
+    }
+    throw e;
+  }
+}
+/** Registra el fallo, pero sin repetir el mismo aviso una y otra vez. */
+function apuntarFalloBD(origen, e){
+  if (e && e.sinBD){
+    if (idbCaido) return;         // ya avisamos la primera vez
+    idbCaido = true;
+  }
+  apuntarError(origen, e);
+}
+
 function idbGet(k){
-  return abrirDB().then(db => db ? new Promise((res,rej) => {
+  return conDB(db => new Promise((res,rej) => {
     const r = db.transaction(STORE,"readonly").objectStore(STORE).get(k);
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-  }) : null);
+  }));
 }
 function idbPut(k,v){
-  return abrirDB().then(db => db ? new Promise((res,rej) => {
+  return conDB(db => new Promise((res,rej) => {
     const tx = db.transaction(STORE,"readwrite");
     tx.objectStore(STORE).put(v,k);
     tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
-  }) : null);
+  }));
 }
+
+/* Al irse a segundo plano se suelta la conexión a propósito: es lo que iOS
+   iba a hacer de todas formas, pero así lo hacemos ordenadamente. */
+window.addEventListener("pagehide", cerrarDB);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") cerrarDB();
+});
 async function leerDisco(){
   try{
     const v = await idbGet(KEY);
     if (v){ ALMACEN = "IndexedDB"; return typeof v === "string" ? JSON.parse(v) : v; }
-  } catch(e){ apuntarError("leer-idb", e); }
+  } catch(e){ apuntarFalloBD("leer-idb", e); }
   try{
     const t = localStorage.getItem(LS_KEY);
     if (t){ ALMACEN = "localStorage"; return JSON.parse(t); }
@@ -784,7 +855,7 @@ function escribirDisco(estado){
     try { localStorage.setItem(LS_KEY, txt); ok = true; ALMACEN = "localStorage"; }
     catch(e){ apuntarError("guardar-ls", e, "posible cuota llena"); }
     try { await idbPut(KEY, txt); ok = true; ALMACEN = "IndexedDB"; }
-    catch(e){ apuntarError("guardar-idb", e); }
+    catch(e){ apuntarFalloBD("guardar-idb", e); }
     if (!ok) toast("⚠ No se han podido guardar los datos. Descarga una copia.");
   }).catch(e => apuntarError("cola", e));
   return _cola;
@@ -792,34 +863,58 @@ function escribirDisco(estado){
 
 /* ---------- Copias automáticas semanales (dentro del propio móvil) ---------- */
 const MAX_SNAP = 8;
-/** Guarda una copia ahora mismo, pase lo que pase. Devuelve true si lo logra. */
+const LS_SNAP = "jornal:snap-emergencia";
+const MAX_LS_SNAP = 400 * 1024;   // no llenar localStorage: tiene ~5 MB en total
+
+/** Red de seguridad: si IndexedDB no va, al menos queda la última copia. */
+function snapshotRespaldo(reg){
+  try{
+    const txt = JSON.stringify([reg]);
+    if (txt.length > MAX_LS_SNAP) return false;
+    localStorage.setItem(LS_SNAP, txt);
+    return true;
+  } catch(e){ return false; }
+}
+
+/** Guarda una copia ahora mismo. Devuelve true si lo logra por alguna vía. */
 async function snapshotAhora(motivo){
+  const reg = { fecha: hoyISO(), cuando: new Date().toISOString(),
+                ver: APP_VER, motivo: motivo || "semanal", datos: JSON.stringify(S) };
   try{
     let snaps = (await idbGet(KEY_SNAP)) || [];
     if (typeof snaps === "string") snaps = JSON.parse(snaps);
-    snaps.push({ fecha: hoyISO(), cuando: new Date().toISOString(),
-                 ver: APP_VER, motivo: motivo || "semanal", datos: JSON.stringify(S) });
+    snaps.push(reg);
     while (snaps.length > MAX_SNAP) snaps.shift();
     await idbPut(KEY_SNAP, snaps);
     return true;
-  } catch(e){ apuntarError("snapshot", e); return false; }
+  } catch(e){
+    apuntarFalloBD("snapshot", e);
+    // IndexedDB no está disponible: guardamos al menos esta en localStorage
+    return snapshotRespaldo(reg);
+  }
 }
 /** Copia rutinaria: solo si han pasado 7 días desde la última. */
 async function snapshotSemanal(){
   try{
-    let snaps = (await idbGet(KEY_SNAP)) || [];
-    if (typeof snaps === "string") snaps = JSON.parse(snaps);
-    const ult = snaps.length ? snaps[snaps.length-1].fecha : null;
+    const s = await listarSnapshots();
+    const ult = s.length ? s[s.length-1].fecha : null;
     if (ult && diasEntre(ult, hoyISO()) < 7) return;
     await snapshotAhora("semanal");
-  } catch(e){ apuntarError("snapshot-semanal", e); }
+  } catch(e){ apuntarFalloBD("snapshot-semanal", e); }
 }
 async function listarSnapshots(){
+  let s = [];
   try{
-    let s = (await idbGet(KEY_SNAP)) || [];
+    s = (await idbGet(KEY_SNAP)) || [];
     if (typeof s === "string") s = JSON.parse(s);
-    return s;
-  } catch(e){ apuntarError("listar-snap", e); return []; }
+  } catch(e){ apuntarFalloBD("listar-snap", e); s = []; }
+  if (!s.length){
+    try{
+      const t = localStorage.getItem(LS_SNAP);
+      if (t) s = JSON.parse(t).map(x => ({...x, respaldo:true}));
+    } catch(_){}
+  }
+  return Array.isArray(s) ? s : [];
 }
 
 /* ============================================================
@@ -1606,6 +1701,7 @@ function vistaAjustes(){
     <div class="stat"><span>Jornadas registradas</span><b>${Object.keys(S.dias).length}</b></div>
     <div class="stat"><span>Última copia descargada</span><b class="tiny">${S.ultimoBackup?fmtCorta(S.ultimoBackup):"nunca"}</b></div>
     <div class="stat"><span>Copias automáticas internas</span><b class="tiny" id="nSnap">…</b></div>
+    <div class="stat"><span>Base de datos del móvil</span><b class="tiny" id="estadoBD">…</b></div>
     <div class="stat"><span>Almacenamiento protegido</span><b class="tiny" id="persistEstado">…</b></div>
     ${dirCopias ? `<div class="stat"><span>Carpeta de copias</span>
       <b class="tiny" style="color:var(--ok)">automática ✓</b></div>` : ""}
@@ -3307,7 +3403,20 @@ async function comprobarPersistencia(){
     } catch(e){ el.textContent = "no soportado"; }
   }
   const ns = $("#nSnap");
-  if (ns){ const s = await listarSnapshots(); ns.textContent = s.length + " guardadas"; }
+  if (ns){
+    const s = await listarSnapshots();
+    const resp = s.some(x => x.respaldo);
+    ns.textContent = s.length ? (s.length + (resp ? " (de respaldo)" : " guardadas")) : "ninguna todavía";
+    ns.style.color = s.length ? (resp ? "var(--warn)" : "") : "var(--warn)";
+  }
+  // Prueba real de escritura, para saber si la base de datos responde
+  const bd = $("#estadoBD");
+  if (bd){
+    let ok = false;
+    try { await idbPut("prueba", Date.now()); ok = true; } catch(e){ ok = false; }
+    bd.textContent = ok ? "funcionando" : "no disponible · se usa el respaldo";
+    bd.style.color = ok ? "var(--ok)" : "var(--warn)";
+  }
 }
 
 async function iniciar(){
