@@ -7,7 +7,7 @@
      así el arranque es instantáneo.
    En ningún caso se queda en blanco por falta de conexión. */
 
-const CACHE = "jornal-v1.8.1";
+const CACHE = "jornal-v1.9.0";
 const RED_TIMEOUT = 4000;   // si la red tarda más, tira de caché
 const ASSETS = [
   "./",

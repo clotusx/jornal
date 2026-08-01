@@ -118,6 +118,11 @@ h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute
 .parte input[type=text]{flex:1;min-width:0}
 .parte input[type=number]{width:78px;flex:none;text-align:right;font-family:var(--mono)}
 .parte .del{flex:none;width:34px;height:40px;display:grid;place-items:center;color:var(--accent);opacity:.6}
+/* Nota de cada obra: opcional, por eso el borde discontinuo y el tono apagado */
+.parte-nota{margin:-2px 0 10px;padding:8px 12px;font-size:13.5px;
+  border:1px dashed var(--line);background:transparent;color:var(--muted)}
+.parte-nota:focus{color:var(--ink);border-style:solid}
+.parte-nota::placeholder{opacity:.65}
 
 /* Menú deslizable: si no caben todas las opciones se arrastra con el dedo.
    Las sombras laterales aparecen SOLO cuando queda contenido por ver. */
@@ -349,13 +354,19 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.8.1";
+const APP_VER = "1.9.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.9.0": [
+    "Cada obra puede llevar su nota: apunta si hiciste la barandilla, la puerta o lo que sea.",
+    "Así, mirando atrás, sabes en qué se te fueron las horas de cada día.",
+    "Las notas salen en el informe (PDF, Excel y CSV), y puedes dejarlas fuera si no quieres mandarlas.",
+    "Al copiar el día anterior se traen las obras y las horas, pero no las notas."
+  ],
   "1.8.1": [
     "Arreglado el fallo del iPhone: al cerrar y volver a abrir la app, la base de datos se quedaba colgada.",
     "Si la base de datos falla, ahora se reabre sola y lo reintenta.",
@@ -1322,7 +1333,7 @@ async function onbAccion(a){
 /* ============================================================
    Vistas
    ============================================================ */
-let vFecha = hoyISO(), vPartes = [{obra:"",horas:""}], vTipo = "trabajo",
+let vFecha = hoyISO(), vPartes = [{obra:"",horas:"",nota:""}], vTipo = "trabajo",
     vAusH = "", vNota = "", vSemana = lunes(hoyISO()), vMes = mesDe(hoyISO());
 
 function render(){
@@ -1413,7 +1424,10 @@ function vistaHoy(){
         <button class="del" data-quitar="${i}" ${vPartes.length===1?'style="visibility:hidden"':""} aria-label="Quitar línea">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
         </button>
-      </div>`).join("")}
+      </div>
+      <input type="text" class="parte-nota" placeholder="¿Qué hiciste? Barandilla, puerta…"
+             value="${esc(p.nota||"")}" data-campo="nota" data-i="${i}"
+             maxlength="120" autocapitalize="sentences" enterkeyhint="next">`).join("")}
     </div>
     <datalist id="obrasList">${S.obras.slice(0,80).map(o => `<option value="${esc(o)}">`).join("")}</datalist>
 
@@ -1501,7 +1515,9 @@ function listaDias(fechas, titulo){
           c.noComputada>0 ? `<br><span style="color:var(--warn)">${num(c.noComputada)}h de descanso</span>`:""}</div>
       </div>
       ${c.horasAus>0 ? `<div class="p"><span class="muted">${TIPOS[c.tipo].n}</span><span class="hh">${num(c.horasAus)}h</span></div>`:""}
-      ${c.partes.map(p => `<div class="p"><span>${esc(p.obra)}</span><span class="hh">${num(p.horas)}h</span></div>`).join("")}
+      ${c.partes.map(p => `<div class="p">
+        <span style="flex:1">${esc(p.obra)}${p.nota ? `<br><span class="tiny muted" style="font-style:italic">${esc(p.nota)}</span>` : ""}</span>
+        <span class="hh" style="flex:none">${num(p.horas)}h</span></div>`).join("")}
       ${d.nota ? `<div class="p"><span class="small muted" style="font-style:italic">${esc(d.nota)}</span></div>`:""}
       <div class="p" style="justify-content:flex-end;gap:16px">
         <button class="link" data-editar="${f}">Editar</button>
@@ -1767,11 +1783,11 @@ function vistaAjustes(){
 /* ============================================================
    Acciones
    ============================================================ */
-function masParte(){ vPartes.push({obra:"",horas:""}); render(); }
+function masParte(){ vPartes.push({obra:"",horas:"",nota:""}); render(); }
 function quitarParte(i){ if (vPartes.length>1){ vPartes.splice(i,1); render(); } }
 function ponObra(o){
   const libre = vPartes.findIndex(p => !p.obra.trim());
-  if (libre>=0) vPartes[libre].obra = o; else vPartes.push({obra:o,horas:""});
+  if (libre>=0) vPartes[libre].obra = o; else vPartes.push({obra:o,horas:"",nota:""});
   render();
   const inputs = document.querySelectorAll('#partes input[data-campo="horas"]');
   const idx = libre>=0 ? libre : vPartes.length-1;
@@ -1783,7 +1799,9 @@ function copiarAnterior(){
     f = addDias(f,-1);
     const d = S.dias[f];
     if (d && d.partes && d.partes.length){
-      vPartes = d.partes.map(p => ({obra:p.obra, horas:String(p.horas)}));
+      // Se copian obra y horas, pero no la nota: lo que hiciste ese día
+      // rara vez es lo mismo que vas a hacer hoy.
+      vPartes = d.partes.map(p => ({obra:p.obra, horas:String(p.horas), nota:""}));
       vTipo = d.tipo || "trabajo";
       render(); toast(`Copiado de ${fmtCorta(f)}`); return;
     }
@@ -1792,7 +1810,12 @@ function copiarAnterior(){
 }
 async function guardarDia(){
   const partes = vPartes.filter(p => p.obra.trim() && Number(p.horas)>0)
-    .map(p => ({obra: registrarObra(p.obra), horas: redondea(Number(p.horas))}));
+    .map(p => {
+      const l = { obra: registrarObra(p.obra), horas: redondea(Number(p.horas)) };
+      const n = (p.nota||"").trim();
+      if (n) l.nota = n.slice(0,120);      // solo se guarda si hay algo escrito
+      return l;
+    });
   const total = partes.reduce((s,p)=>s+p.horas,0);
   const ausH = Number(vAusH)||0;
   if (!partes.length && vTipo==="trabajo"){ toast("Añade al menos una obra con horas"); return; }
@@ -1813,7 +1836,7 @@ async function guardarDia(){
   await guardar(vFecha);
 
   const c = calcDia(vFecha, S.dias[vFecha], S.config);
-  vPartes = [{obra:"",horas:""}]; vTipo="trabajo"; vAusH=""; vNota=""; vFecha = hoyISO();
+  vPartes = [{obra:"",horas:"",nota:""}]; vTipo="trabajo"; vAusH=""; vNota=""; vFecha = hoyISO();
   render();
   toast(c.importe>0 ? `Guardado · +${eur(c.importe)} en extras` : "Jornada guardada");
   snapshotSemanal();
@@ -1827,7 +1850,7 @@ async function editar(f){
     "Sí, editar");
   if (!ok) return;
   vFecha = f;
-  vPartes = (d.partes||[]).length ? d.partes.map(p=>({obra:p.obra,horas:String(p.horas)})) : [{obra:"",horas:""}];
+  vPartes = (d.partes||[]).length ? d.partes.map(p=>({obra:p.obra,horas:String(p.horas),nota:p.nota||""})) : [{obra:"",horas:"",nota:""}];
   vTipo = d.tipo||"trabajo";
   vAusH = d.ausenciaHoras ? String(d.ausenciaHoras) : "";
   vNota = d.nota||"";
@@ -1947,7 +1970,9 @@ function descarga(nombre, contenido, tipo){
    ahí solo interesan las horas.
    ============================================================ */
 let expDesde = "", expHasta = "";
-const EXP = { importes:false, porObra:true, detalle:true, descanso:true };
+const EXP = { importes:false, porObra:true, detalle:true, descanso:true, notas:true };
+/** ¿Hay alguna nota de obra en este rango? */
+const hayNotas = d => d.dias.some(c => (c.partes||[]).some(p => p.nota));
 /** Horas de un día tal y como deben salir en el informe */
 const horasInforme = c => EXP.descanso ? c.netas : c.horas;
 
@@ -2044,7 +2069,9 @@ function pintarExportar(){
         "Una tabla con el total de horas dedicadas a cada obra."],
        ["detalle","Detalle día a día",
         "Cada jornada con sus obras y sus horas."]
-      ].concat(conDinero() ? [["importes","Incluir precios e importes",
+      ].concat(hayNotas(d) ? [["notas","Incluir qué hiciste en cada obra",
+        "Las notas que has ido apuntando: barandilla, puerta, lo que sea."]] : [])
+       .concat(conDinero() ? [["importes","Incluir precios e importes",
         "Desactivado, el informe solo muestra horas. Es lo habitual para mandarlo a la empresa."]] : [])
        .map(([k,l,ayuda]) => `
       <div class="between" style="align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)">
@@ -2221,7 +2248,7 @@ ${hojas.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlfor
       partes.push({ nombre:`xl/worksheets/sheet${i+1}.xml`, datos:
         `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<cols><col min="1" max="1" width="13.13" customWidth="1"/><col min="2" max="2" width="6.75" customWidth="1"/><col min="3" max="3" width="7.5" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="13.13" customWidth="1"/><col min="2" max="2" width="6.75" customWidth="1"/><col min="3" max="3" width="7.5" customWidth="1"/><col min="4" max="4" width="32" customWidth="1"/></cols>
 <sheetData>${filas}</sheetData>
 </worksheet>` });
     });
@@ -2255,15 +2282,18 @@ function libroHoras(d){
       filas.push([T(`Total = horas trabajadas menos ${num(S.config.descansoDia)} h de descanso`, S_GRIS)]);
     filas.push([]);
 
+    const conNotas = EXP.notas && dias.some(c => (c.partes||[]).some(p => p.nota));
     dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
       const dia = DIAS[dow(c.fecha)];
-      filas.push([ T(dia.charAt(0).toUpperCase() + dia.slice(1), S_CAB), T("Horas", S_CAB), T("Total", S_CAB) ]);
+      filas.push([ T(dia.charAt(0).toUpperCase() + dia.slice(1), S_CAB), T("Horas", S_CAB), T("Total", S_CAB),
+                   conNotas ? T("Trabajo realizado", S_CAB) : null ]);
       const partes = c.partes.length ? c.partes : [{ obra: TIPOS[c.tipo].n, horas: c.horasAus || 0 }];
       partes.forEach((p,i) => {
         filas.push([
           T(p.obra, S_FILA),
           T(p.horas, S_FILA, true),
-          i === 0 ? T(horasInforme(c), S_TOT, true) : T("", S_TOT)
+          i === 0 ? T(horasInforme(c), S_TOT, true) : T("", S_TOT),
+          conNotas ? T(p.nota || "", S_FILA) : null
         ]);
       });
       // Espacio en blanco entre días, como en la hoja original
@@ -2351,11 +2381,12 @@ function exportarCSV(){
   if (EXP.detalle){
     F.push(["DETALLE POR JORNADA"]);
     const cab = ["Fecha","Día","Tipo","Obra","Horas"];
+    if (EXP.notas) cab.push("Trabajo realizado");
     if (EXP.descanso) cab.push("Trabajadas","Descanso","Total a computar");
     else cab.push("Total del día");
     cab.push("Horas extra");
     if (EXP.importes) cab.push("Importe extra");
-    cab.push("Nota");
+    cab.push("Nota del día");
     F.push(cab);
     d.dias.forEach(c => {
       const nota = (S.dias[c.fecha]||{}).nota || "";
@@ -2363,6 +2394,7 @@ function exportarCSV(){
       filas.forEach((p,i) => {
         const f = [c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n,
                    p ? p.obra : "", p ? num(p.horas) : ""];
+        if (EXP.notas) f.push(p ? (p.nota || "") : "");
         if (EXP.descanso)
           f.push(i===0 ? num(c.horas) : "", i===0 && c.descanso ? "-" + num(c.descanso) : "",
                  i===0 ? num(c.netas) : "");
@@ -2640,6 +2672,40 @@ function pdfInforme(d){
     }
   }
 
+  // --- Trabajos realizados (las notas de cada obra) ---
+  if (EXP.notas && hayNotas(d)){
+    p.sitio(60);
+    p.texto("TRABAJOS REALIZADOS", X, p.y, 9, { negrita:true, color:"#8A6A4A" });
+    p.y -= 15;
+    const cF = X, cO = X + 78, cN = X + 190;
+    p.rect(X, p.y - 4, ANCHO_UTIL, 16, AZUL);
+    p.texto("Fecha", cF + 6, p.y, 9, { negrita:true, color:"#FFFFFF" });
+    p.texto("Obra",  cO, p.y, 9, { negrita:true, color:"#FFFFFF" });
+    p.texto("Trabajo realizado", cN, p.y, 9, { negrita:true, color:"#FFFFFF" });
+    p.y -= 18;
+    let fila = 0;
+    d.dias.forEach(c => {
+      (c.partes || []).forEach(pa => {
+        if (!pa.nota) return;
+        if (p.sitio(18)) p.y -= 6;
+        if (fila++ % 2 === 0) p.rect(X, p.y - 4, ANCHO_UTIL, 15, "#f4f7fd");
+        p.texto(c.fecha.split("-").reverse().slice(0,2).join("/"), cF + 6, p.y, 9, { color:TINTA });
+        let ob = String(pa.obra);
+        while (anchoTextoAprox(ob, 9) > 105 && ob.length > 3) ob = ob.slice(0, -1);
+        p.texto(ob, cO, p.y, 9, { color:TINTA });
+        let nt = String(pa.nota);
+        const anchoNota = ANCHO_UTIL - (cN - X) - 6;
+        if (anchoTextoAprox(nt, 9) > anchoNota){
+          while (nt.length > 3 && anchoTextoAprox(nt + "…", 9) > anchoNota) nt = nt.slice(0, -1);
+          nt += "…";
+        }
+        p.texto(nt, cN, p.y, 9, { color:TINTA });
+        p.y -= 15;
+      });
+    });
+    p.y -= 14;
+  }
+
   // --- Pie ---
   p.sitio(30);
   p.linea(X, p.y + 4, dcha, p.y + 4, "#ded7c8", 0.5);
@@ -2755,7 +2821,8 @@ function verInforme(){
         html += `<table class="excelito"><tbody>
           <tr class="cab"><td>${dia.charAt(0).toUpperCase()+dia.slice(1)}</td><td>Horas</td><td>Total</td></tr>
           ${partes.map((p,i) => `<tr>
-            <td class="obra">${esc(p.obra)}</td>
+            <td class="obra">${esc(p.obra)}${
+              EXP.notas && p.nota ? `<br><span style="font-size:9.5px;color:#5a6b7c;font-style:italic">${esc(p.nota)}</span>` : ""}</td>
             <td class="h">${num(p.horas)}</td>
             ${i===0 ? `<td class="tot" rowspan="${partes.length}">${num(horasInforme(c))}</td>` : ""}
           </tr>`).join("")}
