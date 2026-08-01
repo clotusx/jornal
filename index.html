@@ -354,13 +354,18 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.9.0";
+const APP_VER = "1.9.1";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "1.9.1": [
+    "Fuera la nota del día en las jornadas de trabajo: ya la lleva cada obra por su cuenta.",
+    "Se mantiene en los días de médico, permiso o baja, donde no hay obras donde escribirla.",
+    "Las notas de día que tuvieras escritas se han pasado solas a su primera obra."
+  ],
   "1.9.0": [
     "Cada obra puede llevar su nota: apunta si hiciste la barandilla, la puerta o lo que sea.",
     "Así, mirando atrás, sabes en qué se te fueron las horas de cada día.",
@@ -938,6 +943,31 @@ function estadoNuevo(){
   return { version:2, config:{...CFG_DEF}, perfil:{nombre:"",empresa:""},
            dias:{}, obras:[], nominas:{}, creado:hoyISO(), onboarded:false };
 }
+/**
+ * Antes había una nota por día; ahora cada obra lleva la suya. Las notas
+ * antiguas de días trabajados se pasan a la primera obra de ese día, para que
+ * no se queden huérfanas en un campo que ya no se ve. En los días de ausencia
+ * (médico, permiso…) no hay obras, así que la nota del día se queda donde está.
+ */
+function migrarNotasDia(){
+  if (S.migradoNotas) return 0;
+  let movidas = 0;
+  for (const f in S.dias){
+    const d = S.dias[f];
+    const nd = (d.nota || "").trim();
+    if (!nd) continue;
+    const partes = d.partes || [];
+    if (d.tipo === "trabajo" && partes.length){
+      const p = partes[0];
+      p.nota = p.nota ? (p.nota + " · " + nd) : nd;
+      d.nota = "";
+      movidas++;
+    }
+  }
+  S.migradoNotas = true;
+  return movidas;
+}
+
 function invalidar(fecha){
   _ordenadas = null;
   if (fecha){ cacheSem.delete(lunes(fecha)); cacheMes.delete(mesDe(fecha)); }
@@ -1433,10 +1463,13 @@ function vistaHoy(){
 
     <button class="btn ghost" style="margin:2px 0 10px" data-acc="mas">+ Otra obra ese día</button>
 
+    ${/* En un día de trabajo cada obra lleva su propia nota, así que aquí sobra.
+          En médico, permiso o baja no hay obras: ahí sí hace falta un sitio donde escribir. */""}
+    ${vTipo === "trabajo" ? "" : `
     <div class="grupo" style="margin-bottom:11px">
-      <input type="text" id="notaIn" placeholder="Nota del día (opcional)" value="${esc(vNota)}"
+      <input type="text" id="notaIn" placeholder="Motivo o detalle (opcional)" value="${esc(vNota)}"
              maxlength="140" autocapitalize="sentences">
-    </div>
+    </div>`}
 
     <div id="previo">${previoHTML()}</div>
     <button class="btn" data-acc="guardar">${yaHay ? "Actualizar día" : "Guardar día"}</button>
@@ -1831,7 +1864,7 @@ async function guardarDia(){
   }
   S.dias[vFecha] = { tipo:vTipo, partes,
     ausenciaHoras: vTipo==="trabajo" ? 0 : (ausH || (partes.length ? 0 : S.config.jornada)),
-    nota: (vNota||"").slice(0,140) };
+    nota: vTipo === "trabajo" ? "" : (vNota||"").slice(0,140) };
   if (nuevo) _ordenadas = null;
   await guardar(vFecha);
 
@@ -2386,7 +2419,7 @@ function exportarCSV(){
     else cab.push("Total del día");
     cab.push("Horas extra");
     if (EXP.importes) cab.push("Importe extra");
-    cab.push("Nota del día");
+    cab.push("Motivo de la ausencia");
     F.push(cab);
     d.dias.forEach(c => {
       const nota = (S.dias[c.fecha]||{}).nota || "";
@@ -3499,6 +3532,12 @@ async function iniciar(){
          config:{...CFG_DEF, ...(guardado.config||{})},
          perfil:{nombre:"",empresa:"", ...(guardado.perfil||{})}};
     if (!S.onboarded && Object.keys(S.dias).length) S.onboarded = true;  // datos previos: no repetir el alta
+    const movidas = migrarNotasDia();
+    if (movidas){
+      invalidar();
+      guardar();
+      setTimeout(() => toast(`${movidas} nota${movidas===1?"":"s"} pasada${movidas===1?"":"s"} a su obra`), 1400);
+    }
   } else {
     S = estadoNuevo();
     onbDatos = {...CFG_DEF};
