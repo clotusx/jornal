@@ -260,7 +260,7 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
 
 /* Maqueta calcada de la hoja «Horas curro»: bloques de día en tres columnas */
 .hoja .bloques{display:flex;flex-wrap:wrap;gap:14px}
-.hoja .excelito{width:230px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;
+.hoja .excelito{width:245px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;
   font-size:11.5px;break-inside:avoid;margin-bottom:2px}
 .hoja .excelito td{padding:4px 7px;border:1px solid #fff;text-align:center;height:19px}
 .hoja .excelito .cab td{background:#4A86E8;color:#fff;font-weight:700}
@@ -354,13 +354,20 @@ body.imprimiendo #app,body.imprimiendo nav,body.imprimiendo .sheet{display:none!
    · Los datos de cada persona viven solo en su propio móvil.
    ============================================================ */
 
-const APP_VER = "1.9.1";
+const APP_VER = "2.0.0";
 const EMAIL_SOPORTE = "clotusx@gmail.com";
 const CARPETA_COPIAS = "Copias de seguridad Jornal";
 
 /* Novedades que se muestran tras actualizar. Añade aquí la versión nueva
    arriba del todo cada vez que publiques cambios. */
 const NOVEDADES = {
+  "2.0.0": [
+    "El informe que compartes es ahora una IMAGEN: se ve sola en WhatsApp, sin abrir ningún archivo.",
+    "Va sencillo a propósito: tu nombre bien grande arriba y cada día con su fecha y sus obras.",
+    "Cada día lleva su fecha: «Lunes 20 de julio», no solo «Lunes».",
+    "Los informes ya no descuentan el descanso: salen las horas que has trabajado.",
+    "Se acabó el PDF. La imagen es más fácil de mandar y de leer en el móvil."
+  ],
   "1.9.1": [
     "Fuera la nota del día en las jornadas de trabajo: ya la lleva cada obra por su cuenta.",
     "Se mantiene en los días de médico, permiso o baja, donde no hay obras donde escribirla.",
@@ -2003,11 +2010,18 @@ function descarga(nombre, contenido, tipo){
    ahí solo interesan las horas.
    ============================================================ */
 let expDesde = "", expHasta = "";
-const EXP = { importes:false, porObra:true, detalle:true, descanso:true, notas:true };
+const EXP = { importes:false, porObra:true, detalle:true, notas:true };
 /** ¿Hay alguna nota de obra en este rango? */
 const hayNotas = d => d.dias.some(c => (c.partes||[]).some(p => p.nota));
-/** Horas de un día tal y como deben salir en el informe */
-const horasInforme = c => EXP.descanso ? c.netas : c.horas;
+/** Horas de un día en el informe: las trabajadas, sin descontar nada */
+const horasInforme = c => c.horas;
+/** Etiqueta del día con su fecha: «Lunes 27/07» */
+function diaConFecha(f, corto){
+  const dia = DIAS[dow(f)], d = parse(f);
+  const N = dia.charAt(0).toUpperCase() + dia.slice(1);
+  return corto ? `${N} ${d.getDate()}/${String(d.getMonth()+1).padStart(2,"0")}`
+               : `${N} ${d.getDate()} de ${MESES[d.getMonth()]}`;
+}
 
 /** Agrega todo lo registrado entre dos fechas, ambas incluidas. */
 function datosRango(desde, hasta){
@@ -2094,11 +2108,9 @@ function pintarExportar(){
       <b>${d.dias.length} jornada${d.dias.length===1?"":"s"}</b> · ${num(d.horas)} h</p>
 
     <div class="small" style="font-weight:600;margin-bottom:2px">Contenido</div>
-    ${[["descanso", `Descontar el descanso (${num(S.config.descansoDia)} h al día)`,
-        `El total de cada día sale ya con el descanso restado, que es como lo computa la empresa. ` +
-        `Un lunes de 8,5 h y un martes de 10,5 h salen como ${num(8.5 - S.config.descansoDia)} + ${num(10.5 - S.config.descansoDia)} = ` +
-        `<b>${num(19 - 2*S.config.descansoDia)} h</b>.`],
-       ["porObra","Resumen por obra",
+    <div class="tiny muted" style="margin-bottom:4px">Afecta al Excel, al CSV y al informe detallado.
+      La imagen que se comparte siempre va sencilla: los días con sus obras.</div>
+    ${[["porObra","Resumen por obra",
         "Una tabla con el total de horas dedicadas a cada obra."],
        ["detalle","Detalle día a día",
         "Cada jornada con sus obras y sus horas."]
@@ -2116,18 +2128,18 @@ function pintarExportar(){
       </div>`).join("")}
 
     <div style="display:grid;gap:8px;margin-top:18px">
-      <button class="btn" data-acc="exp-compartir-pdf" ${d.dias.length?"":"disabled"}>
+      <button class="btn" data-acc="exp-compartir-img" ${d.dias.length?"":"disabled"}>
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M12 3 8 7M12 3l4 4"/>
         <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
-        Compartir PDF</button>
+        Compartir informe</button>
       <div class="tiny muted" style="text-align:center;margin:-3px 0 4px">
-        Se abre el menú del móvil: WhatsApp, correo, Archivos…</div>
+        Se manda como imagen: se ve directamente en WhatsApp, sin abrir nada</div>
       <button class="btn sec" data-acc="exp-excel" ${d.dias.length?"":"disabled"}>Descargar Excel</button>
       <div class="tiny muted" style="text-align:center;margin:-3px 0 4px">
         Mismo formato que tu hoja «Horas curro»: una pestaña por semana</div>
-      <button class="btn ghost" data-acc="exp-pdf-bajar" ${d.dias.length?"":"disabled"}>Solo descargar el PDF</button>
-      <button class="btn ghost" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver el informe en pantalla</button>
+      <button class="btn ghost" data-acc="exp-img-bajar" ${d.dias.length?"":"disabled"}>Solo guardar la imagen</button>
+      <button class="btn ghost" data-acc="exp-pdf" ${d.dias.length?"":"disabled"}>Ver el informe detallado</button>
       <button class="btn ghost" data-acc="exp-csv" ${d.dias.length?"":"disabled"}>Descargar CSV</button>
       <button class="btn ghost" data-cerrar>Cancelar</button>
     </div>
@@ -2281,7 +2293,7 @@ ${hojas.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlfor
       partes.push({ nombre:`xl/worksheets/sheet${i+1}.xml`, datos:
         `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<cols><col min="1" max="1" width="13.13" customWidth="1"/><col min="2" max="2" width="6.75" customWidth="1"/><col min="3" max="3" width="7.5" customWidth="1"/><col min="4" max="4" width="32" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="16" customWidth="1"/><col min="2" max="2" width="6.75" customWidth="1"/><col min="3" max="3" width="7.5" customWidth="1"/><col min="4" max="4" width="32" customWidth="1"/></cols>
 <sheetData>${filas}</sheetData>
 </worksheet>` });
     });
@@ -2311,14 +2323,11 @@ function libroHoras(d){
     const fin = addDias(lun, 6);
     filas.push([T(`${fmtCorta(lun)} - ${fmtCorta(fin)}`, S_TIT)]);
     if (S.perfil.nombre) filas.push([T(S.perfil.nombre, S_NEG)]);
-    if (EXP.descanso)
-      filas.push([T(`Total = horas trabajadas menos ${num(S.config.descansoDia)} h de descanso`, S_GRIS)]);
     filas.push([]);
 
     const conNotas = EXP.notas && dias.some(c => (c.partes||[]).some(p => p.nota));
     dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
-      const dia = DIAS[dow(c.fecha)];
-      filas.push([ T(dia.charAt(0).toUpperCase() + dia.slice(1), S_CAB), T("Horas", S_CAB), T("Total", S_CAB),
+      filas.push([ T(diaConFecha(c.fecha, true), S_CAB), T("Horas", S_CAB), T("Total", S_CAB),
                    conNotas ? T("Trabajo realizado", S_CAB) : null ]);
       const partes = c.partes.length ? c.partes : [{ obra: TIPOS[c.tipo].n, horas: c.horasAus || 0 }];
       partes.forEach((p,i) => {
@@ -2390,13 +2399,7 @@ function exportarCSV(){
 
   F.push(["RESUMEN"]);
   F.push(["Días trabajados", d.diasTrab]);
-  if (EXP.descanso){
-    F.push(["Horas trabajadas", num(d.horas)]);
-    F.push([`Descanso descontado (${num(S.config.descansoDia)} h/día)`, "-" + num(d.descanso)]);
-    F.push(["HORAS A COMPUTAR", num(d.netas)]);
-  } else {
-    F.push(["Horas totales", num(d.horas)]);
-  }
+  F.push(["Horas totales", num(d.horas)]);
   F.push(["Horas ordinarias", num(d.ordinarias)]);
   F.push(["Horas extra", num(d.extraPagada)]);
   if (EXP.importes) F.push(["Importe de las horas extra", num(d.importe)]);
@@ -2415,8 +2418,7 @@ function exportarCSV(){
     F.push(["DETALLE POR JORNADA"]);
     const cab = ["Fecha","Día","Tipo","Obra","Horas"];
     if (EXP.notas) cab.push("Trabajo realizado");
-    if (EXP.descanso) cab.push("Trabajadas","Descanso","Total a computar");
-    else cab.push("Total del día");
+    cab.push("Total del día");
     cab.push("Horas extra");
     if (EXP.importes) cab.push("Importe extra");
     cab.push("Motivo de la ausencia");
@@ -2428,10 +2430,7 @@ function exportarCSV(){
         const f = [c.fecha, DIAS[dow(c.fecha)], TIPOS[c.tipo].n,
                    p ? p.obra : "", p ? num(p.horas) : ""];
         if (EXP.notas) f.push(p ? (p.nota || "") : "");
-        if (EXP.descanso)
-          f.push(i===0 ? num(c.horas) : "", i===0 && c.descanso ? "-" + num(c.descanso) : "",
-                 i===0 ? num(c.netas) : "");
-        else f.push(i===0 ? num(c.horas) : "");
+        f.push(i===0 ? num(c.horas) : "");
         f.push(i===0 ? num(c.extraPagada) : "");
         if (EXP.importes) f.push(i===0 ? num(c.importe) : "");
         f.push(i===0 ? nota : "");
@@ -2444,359 +2443,231 @@ function exportarCSV(){
   const nom = `horas-${S.perfil.nombre ? S.perfil.nombre.split(" ")[0].toLowerCase()+"-" : ""}${expDesde}_${expHasta}.csv`;
   if (descarga(nom, csv, "text/csv;charset=utf-8")){ cerrarSheet(); toast("CSV descargado — se abre con Excel"); }
 }
-
 /* ============================================================
-   Generador de PDF
-   Un PDF es texto plano con objetos numerados y una tabla de
-   referencias al final. Se usan las fuentes Helvetica estándar,
-   que no hay que incrustar, y codificación WinAnsi, que cubre
-   todos los acentos y la eñe del castellano.
+   Informe en imagen (JPG)
+   Se dibuja en un canvas, que es nativo del navegador. Una imagen se
+   previsualiza sola en WhatsApp o en el correo, así que se lee de un
+   vistazo sin tener que abrir ningún archivo.
    ============================================================ */
-const PDF = (() => {
-  const ANCHO = 595.28, ALTO = 841.89, M = 40;   // A4 vertical
+const IMG_TIPO = "image/jpeg", IMG_CALIDAD = 0.92;
 
-  // Anchuras de Helvetica (por cada 1000 unidades) para calcular centrados
-  const W = {};
-  {
-    const asc = "278 278 355 556 556 889 667 191 333 333 389 584 278 333 278 278 "+
-      "556 556 556 556 556 556 556 556 556 556 278 278 584 584 584 556 1015 "+
-      "667 667 722 722 667 611 778 722 278 500 667 556 833 722 778 667 778 722 667 611 722 667 944 667 667 611 "+
-      "278 278 278 469 556 333 "+
-      "556 556 500 556 556 278 556 556 222 222 500 222 833 556 556 556 556 333 500 278 556 500 722 500 500 500 "+
-      "334 260 334 584";
-    asc.split(" ").forEach((v,i) => W[32+i] = +v);
+/** Parte el texto en varias líneas para que quepa en `ancho`. */
+function partirTexto(ctx, texto, ancho){
+  const palabras = String(texto).split(/\s+/);
+  const lineas = [];
+  let linea = "";
+  for (const p of palabras){
+    const prueba = linea ? linea + " " + p : p;
+    if (ctx.measureText(prueba).width > ancho && linea){ lineas.push(linea); linea = p; }
+    else linea = prueba;
   }
-  const anchoTexto = (s, tam) => {
-    let t = 0;
-    for (const ch of s){ const c = ch.codePointAt(0); t += (c < 127 ? (W[c] || 556) : 556); }
-    return t * tam / 1000;
-  };
-
-  /* Unicode → WinAnsi (CP1252). El castellano cabe entero en Latin-1. */
-  const ESPECIAL = { 0x20AC:0x80, 0x201A:0x82, 0x2026:0x85, 0x2018:0x91, 0x2019:0x92,
-                     0x201C:0x93, 0x201D:0x94, 0x2022:0x95, 0x2013:0x96, 0x2014:0x97,
-                     0x2212:0x2D, 0x00A0:0x20, 0x2010:0x2D, 0x2011:0x2D };
-  function winAnsi(s){
-    let o = "";
-    for (const ch of String(s)){
-      const c = ch.codePointAt(0);
-      o += String.fromCharCode(c < 256 ? c : (ESPECIAL[c] || 0x3F));
-    }
-    return o;
-  }
-  const escapa = s => winAnsi(s).replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)");
-
-  function nuevo(){
-    const paginas = [];
-    let ops = null;
-    const api = {
-      get y(){ return api._y; },
-      set y(v){ api._y = v; },
-      _y: 0,
-      ANCHO, ALTO, M, anchoUtil: ANCHO - M*2,
-
-      pagina(){ ops = []; paginas.push(ops); api._y = ALTO - M; return api; },
-      /** ¿Cabe algo de `alto` puntos? Si no, salta de página. */
-      sitio(alto){ if (api._y - alto < M){ api.pagina(); return true; } return false; },
-
-      color(hex){
-        const n = parseInt(hex.replace("#",""), 16);
-        ops.push(`${(((n>>16)&255)/255).toFixed(3)} ${(((n>>8)&255)/255).toFixed(3)} ${((n&255)/255).toFixed(3)} rg`);
-        return api;
-      },
-      rect(x, y, w, h, hex){ api.color(hex); ops.push(`${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`); return api; },
-      linea(x1, y1, x2, y2, hex, grosor){
-        const n = parseInt((hex||"#000000").replace("#",""), 16);
-        ops.push(`${(((n>>16)&255)/255).toFixed(3)} ${(((n>>8)&255)/255).toFixed(3)} ${((n&255)/255).toFixed(3)} RG`);
-        ops.push(`${(grosor||0.5)} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`);
-        return api;
-      },
-      /** al: "izq" | "centro" | "der" */
-      texto(s, x, y, tam, opt){
-        s = String(s == null ? "" : s);
-        if (!s) return api;
-        const o = opt || {};
-        const fuente = o.negrita ? "F2" : "F1";
-        let px = x;
-        if (o.al === "centro") px = x - anchoTexto(s, tam)/2;
-        else if (o.al === "der") px = x - anchoTexto(s, tam);
-        api.color(o.color || "#000000");
-        ops.push(`BT /${fuente} ${tam} Tf 1 0 0 1 ${px.toFixed(2)} ${y.toFixed(2)} Tm (${escapa(s)}) Tj ET`);
-        return api;
-      },
-
-      blob(){
-        const objetos = [];
-        const idPag = i => 4 + i*2;           // cada página usa 2 objetos
-        objetos[1] = `<</Type/Catalog/Pages 2 0 R>>`;
-        objetos[2] = `<</Type/Pages/Kids[${paginas.map((_,i)=>`${idPag(i)} 0 R`).join(" ")}]/Count ${paginas.length}>>`;
-        objetos[3] = `<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>`;
-        const idBold = 4 + paginas.length*2;
-        paginas.forEach((p, i) => {
-          const flujo = p.join("\n");
-          objetos[idPag(i)] =
-            `<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${ANCHO} ${ALTO}]` +
-            `/Resources<</Font<</F1 3 0 R/F2 ${idBold} 0 R>>>>/Contents ${idPag(i)+1} 0 R>>`;
-          objetos[idPag(i)+1] = `<</Length ${flujo.length}>>\nstream\n${flujo}\nendstream`;
-        });
-        objetos[idBold] = `<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>`;
-
-        let salida = "%PDF-1.4\n";
-        const pos = [];
-        for (let i = 1; i < objetos.length; i++){
-          if (!objetos[i]) continue;
-          pos[i] = salida.length;
-          salida += `${i} 0 obj\n${objetos[i]}\nendobj\n`;
-        }
-        const inicioXref = salida.length;
-        const n = objetos.length;
-        salida += `xref\n0 ${n}\n0000000000 65535 f \n`;
-        for (let i = 1; i < n; i++)
-          salida += (pos[i] != null)
-            ? `${String(pos[i]).padStart(10,"0")} 00000 n \n`
-            : `0000000000 65535 f \n`;
-        salida += `trailer\n<</Size ${n}/Root 1 0 R>>\nstartxref\n${inicioXref}\n%%EOF`;
-
-        const bytes = new Uint8Array(salida.length);
-        for (let i = 0; i < salida.length; i++) bytes[i] = salida.charCodeAt(i) & 0xFF;
-        return new Blob([bytes], { type:"application/pdf" });
-      }
-    };
-    return api.pagina();
-  }
-  return { nuevo };
-})();
-
-/** Dibuja el informe completo en un PDF y devuelve el Blob. */
-function pdfInforme(d){
-  const AZUL = "#4A86E8", CLARO = "#C9DAF8", VERDE = "#D0E0E3";
-  const GRIS = "#6b635a", TINTA = "#1c1a17";
-  const p = PDF.nuevo();
-  const X = p.M, ANCHO_UTIL = p.anchoUtil;
-
-  // --- Cabecera ---
-  p.texto("Informe de horas", X, p.y - 16, 17, { negrita:true, color:TINTA });
-  const et = etiquetaRango(d.desde, d.hasta);
-  p.texto(et.charAt(0).toUpperCase() + et.slice(1), X, p.y - 30, 10, { color:GRIS });
-  const dcha = X + ANCHO_UTIL;
-  if (S.perfil.nombre) p.texto(S.perfil.nombre, dcha, p.y - 14, 10, { al:"der", negrita:true, color:TINTA });
-  if (S.perfil.empresa) p.texto(S.perfil.empresa, dcha, p.y - 26, 9.5, { al:"der", color:GRIS });
-  p.texto(`${d.desde.split("-").reverse().join("/")} - ${d.hasta.split("-").reverse().join("/")}`,
-          dcha, p.y - 38, 8.5, { al:"der", color:GRIS });
-  p.y -= 46;
-  p.linea(X, p.y, dcha, p.y, TINTA, 1.5);
-  p.y -= 20;
-
-  // --- Resumen ---
-  const filas = [["Días trabajados", String(d.diasTrab)]];
-  if (EXP.descanso){
-    filas.push(["Horas trabajadas", num(d.horas) + " h"]);
-    filas.push([`Descanso descontado (${num(S.config.descansoDia)} h × ${d.diasTrab} días)`, "− " + num(d.descanso) + " h"]);
-    filas.push(["HORAS A COMPUTAR", num(d.netas) + " h"]);
-  } else {
-    filas.push(["Horas totales", num(d.horas) + " h"]);
-  }
-  filas.push(["De ellas, ordinarias", num(d.ordinarias) + " h"]);
-  filas.push(["Horas extra", num(d.extraPagada) + " h"]);
-  if (EXP.importes) filas.push(["Importe de las horas extra", eur(d.importe)]);
-  Object.entries(d.ausencias).forEach(([k,v]) => filas.push([TIPOS[k].n, v + (v===1?" día":" días")]));
-
-  filas.forEach(([a,b], i) => {
-    p.sitio(16);
-    p.texto(a, X, p.y, 10, { color:TINTA });
-    p.texto(b, dcha, p.y, 10, { al:"der", negrita:true, color:TINTA });
-    p.linea(X, p.y - 4, dcha, p.y - 4, "#e8e2d6", 0.5);
-    p.y -= 16;
-  });
-  p.y -= 12;
-
-  // --- Horas por obra ---
-  if (EXP.porObra && d.obras.length){
-    p.sitio(60);
-    p.texto("HORAS POR OBRA", X, p.y, 9, { negrita:true, color:"#8A6A4A" });
-    p.y -= 15;
-    const cJ = X + 330, cH = X + 430;
-    p.rect(X, p.y - 4, ANCHO_UTIL, 16, AZUL);
-    p.texto("Obra", X + 6, p.y, 9, { negrita:true, color:"#FFFFFF" });
-    p.texto("Jornadas", cJ, p.y, 9, { al:"centro", negrita:true, color:"#FFFFFF" });
-    p.texto("Horas", cH, p.y, 9, { al:"centro", negrita:true, color:"#FFFFFF" });
-    p.y -= 18;
-    d.obras.forEach((o, i) => {
-      if (p.sitio(18)) p.y -= 6;
-      if (i % 2 === 0) p.rect(X, p.y - 4, ANCHO_UTIL, 15, "#f4f7fd");
-      p.texto(o.nombre, X + 6, p.y, 9.5, { color:TINTA });
-      p.texto(String(o.dias), cJ, p.y, 9.5, { al:"centro", color:TINTA });
-      p.texto(num(o.horas), cH, p.y, 9.5, { al:"centro", negrita:true, color:TINTA });
-      p.y -= 15;
-    });
-    p.sitio(20);
-    p.rect(X, p.y - 4, ANCHO_UTIL, 16, VERDE);
-    p.texto("TOTAL", X + 6, p.y, 9.5, { negrita:true, color:TINTA });
-    p.texto(String(d.diasTrab), cJ, p.y, 9.5, { al:"centro", negrita:true, color:TINTA });
-    p.texto(num(d.horas), cH, p.y, 9.5, { al:"centro", negrita:true, color:TINTA });
-    p.y -= 30;
-  }
-
-  // --- Bloques por día, con la maqueta de la hoja de siempre ---
-  if (EXP.detalle && d.dias.length){
-    const semanas = new Map();
-    d.dias.forEach(c => {
-      const l = lunes(c.fecha);
-      if (!semanas.has(l)) semanas.set(l, []);
-      semanas.get(l).push(c);
-    });
-    const BW = 165, GAP = 10, FILA = 14;
-    const cObra = 93, cHoras = 36, cTotal = 36;
-
-    for (const [lun, dias] of [...semanas.entries()].sort()){
-      p.sitio(70);
-      p.texto(`${fmtCorta(lun)} - ${fmtCorta(addDias(lun,6))}`.toUpperCase(), X, p.y, 9,
-              { negrita:true, color:"#8A6A4A" });
-      p.y -= 16;
-
-      const orden = dias.slice().sort((a,b) => a.fecha < b.fecha ? -1 : 1);
-      const partesDe = c => c.partes.length ? c.partes : [{ obra:TIPOS[c.tipo].n, horas:c.horasAus||0 }];
-
-      // Se dibujan de tres en tres, todos alineados por arriba
-      for (let i = 0; i < orden.length; i += 3){
-        const grupo = orden.slice(i, i + 3);
-        const altoFila = FILA * (1 + Math.max(...grupo.map(c => partesDe(c).length)));
-        p.sitio(altoFila + 10);
-        const yTop = p.y;
-
-        grupo.forEach((c, col) => {
-          const bx = X + col * (BW + GAP);
-          const partes = partesDe(c);
-          let by = yTop;
-
-          p.rect(bx, by - FILA + 4, BW, FILA, AZUL);
-          const dia = DIAS[dow(c.fecha)];
-          p.texto(dia.charAt(0).toUpperCase() + dia.slice(1), bx + 5, by - 6, 8.5, { negrita:true, color:"#FFFFFF" });
-          p.texto("Horas", bx + cObra + cHoras/2, by - 6, 8.5, { al:"centro", negrita:true, color:"#FFFFFF" });
-          p.texto("Total", bx + cObra + cHoras + cTotal/2, by - 6, 8.5, { al:"centro", negrita:true, color:"#FFFFFF" });
-          by -= FILA;
-
-          // Casilla del total: una sola, tan alta como las filas del día
-          p.rect(bx + cObra + cHoras, by - FILA*partes.length + 4, cTotal, FILA*partes.length, VERDE);
-          p.texto(num(horasInforme(c)), bx + cObra + cHoras + cTotal/2, by - 6, 8.5, { al:"centro", negrita:true, color:TINTA });
-
-          partes.forEach(pa => {
-            p.rect(bx, by - FILA + 4, cObra + cHoras, FILA, CLARO);
-            let nom = String(pa.obra);
-            if (anchoTextoAprox(nom, 8.5) > cObra - 10){
-              while (nom.length > 3 && anchoTextoAprox(nom + "…", 8.5) > cObra - 10) nom = nom.slice(0, -1);
-              nom += "…";
-            }
-            p.texto(nom, bx + 5, by - 6, 8.5, { color:TINTA });
-            p.texto(num(pa.horas), bx + cObra + cHoras/2, by - 6, 8.5, { al:"centro", color:TINTA });
-            by -= FILA;
-          });
-        });
-        p.y = yTop - altoFila - 8;
-      }
-
-      // Total de la semana
-      const tot = redondea(dias.reduce((s,c) => s + horasInforme(c), 0));
-      p.sitio(24);
-      p.rect(X, p.y - FILA + 4, BW, FILA, AZUL);
-      p.texto("Total semana", X + 5, p.y - 6, 8.5, { negrita:true, color:"#FFFFFF" });
-      p.texto(num(tot), X + cObra + cHoras + cTotal/2, p.y - 6, 8.5, { al:"centro", negrita:true, color:"#FFFFFF" });
-      p.y -= 34;
-    }
-  }
-
-  // --- Trabajos realizados (las notas de cada obra) ---
-  if (EXP.notas && hayNotas(d)){
-    p.sitio(60);
-    p.texto("TRABAJOS REALIZADOS", X, p.y, 9, { negrita:true, color:"#8A6A4A" });
-    p.y -= 15;
-    const cF = X, cO = X + 78, cN = X + 190;
-    p.rect(X, p.y - 4, ANCHO_UTIL, 16, AZUL);
-    p.texto("Fecha", cF + 6, p.y, 9, { negrita:true, color:"#FFFFFF" });
-    p.texto("Obra",  cO, p.y, 9, { negrita:true, color:"#FFFFFF" });
-    p.texto("Trabajo realizado", cN, p.y, 9, { negrita:true, color:"#FFFFFF" });
-    p.y -= 18;
-    let fila = 0;
-    d.dias.forEach(c => {
-      (c.partes || []).forEach(pa => {
-        if (!pa.nota) return;
-        if (p.sitio(18)) p.y -= 6;
-        if (fila++ % 2 === 0) p.rect(X, p.y - 4, ANCHO_UTIL, 15, "#f4f7fd");
-        p.texto(c.fecha.split("-").reverse().slice(0,2).join("/"), cF + 6, p.y, 9, { color:TINTA });
-        let ob = String(pa.obra);
-        while (anchoTextoAprox(ob, 9) > 105 && ob.length > 3) ob = ob.slice(0, -1);
-        p.texto(ob, cO, p.y, 9, { color:TINTA });
-        let nt = String(pa.nota);
-        const anchoNota = ANCHO_UTIL - (cN - X) - 6;
-        if (anchoTextoAprox(nt, 9) > anchoNota){
-          while (nt.length > 3 && anchoTextoAprox(nt + "…", 9) > anchoNota) nt = nt.slice(0, -1);
-          nt += "…";
-        }
-        p.texto(nt, cN, p.y, 9, { color:TINTA });
-        p.y -= 15;
-      });
-    });
-    p.y -= 14;
-  }
-
-  // --- Pie ---
-  p.sitio(30);
-  p.linea(X, p.y + 4, dcha, p.y + 4, "#ded7c8", 0.5);
-  p.texto(`Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}` +
-          (EXP.descanso ? ` · Los totales llevan descontadas ${num(S.config.descansoDia)} h de descanso por día` : "") +
-          (EXP.importes ? "" : " · Sin importes económicos"),
-          X + ANCHO_UTIL/2, p.y - 8, 8, { al:"centro", color:"#8a8177" });
-
-  return p.blob();
+  if (linea) lineas.push(linea);
+  return lineas;
 }
-/* Ancho aproximado para recortar nombres largos de obra */
-function anchoTextoAprox(s, tam){ return String(s).length * tam * 0.52; }
 
-function nombrePDF(){
+/**
+ * Informe en imagen con la misma maqueta de siempre: bloques de día en azul,
+ * filas de obra en azul claro y la casilla del total en verde agua. Arriba, el
+ * nombre del trabajador bien grande.
+ */
+function imagenInforme(d){
+  const W = 1000, P = 58;
+  const F = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  const AZUL = "#4A86E8", CLARO = "#C9DAF8", VERDE = "#D0E0E3", AUSEN = "#E4DDEE";
+  const TINTA = "#1C1A17", SUAVE = "#8A6A4A", NOTA = "#5A6B7C";
+  const AU = W - P*2;                       // ancho útil
+  const cObra = AU - 320, cHoras = 160, cTotal = 160;
+  const H_CAB = 56, H_FILA = 52, H_NOTA = 32;
+
+  const medidor = document.createElement("canvas").getContext("2d");
+
+  // --- Medir: se agrupan los días por semana, como en la hoja ---
+  const semanas = new Map();
+  d.dias.forEach(c => {
+    const l = lunes(c.fecha);
+    if (!semanas.has(l)) semanas.set(l, []);
+    semanas.get(l).push(c);
+  });
+
+  const bloques = [];
+  for (const [lun, dias] of [...semanas.entries()].sort()){
+    const sem = { lunes:lun, etiqueta:`${fmtCorta(lun)} – ${fmtCorta(addDias(lun,6))}`.toUpperCase(),
+                  dias:[], total:0 };
+    dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
+      const ausencia = !c.partes.length && c.tipo !== "trabajo";
+      const partes = c.partes.length ? c.partes
+        : [{ obra: TIPOS[c.tipo].n, horas: c.horasAus || 0,
+             nota: (S.dias[c.fecha]||{}).nota || "" }];
+      const filas = partes.map(p => {
+        let lineas = [];
+        if (EXP.notas && p.nota){
+          medidor.font = `italic 23px ${F}`;
+          lineas = partirTexto(medidor, p.nota, cObra - 40);
+        }
+        return { obra:p.obra, horas:num(p.horas), lineas,
+                 alto: H_FILA + lineas.length * H_NOTA };
+      });
+      const alto = filas.reduce((s,f) => s + f.alto, 0);
+      sem.dias.push({ fecha:c.fecha, ausencia, filas, alto,
+                      total: ausencia ? TIPOS[c.tipo].n : num(horasInforme(c)) });
+      if (!ausencia) sem.total = redondea(sem.total + horasInforme(c));
+    });
+    bloques.push(sem);
+  }
+
+  // --- Alto total de la imagen ---
+  let H = P;
+  if (S.perfil.nombre) H += 96;
+  if (S.perfil.empresa) H += 40;
+  H += 46 + 34;                                   // periodo + regla
+  // Con una sola semana el periodo ya va en la cabecera: no hace falta repetirlo
+  const variasSemanas = bloques.length > 1;
+  bloques.forEach(s => {
+    if (variasSemanas) H += 46;                   // etiqueta de la semana
+    s.dias.forEach(dd => { H += H_CAB + dd.alto + 20; });
+    H += H_CAB + 34;                              // barra de total de semana
+  });
+  H += 50 + P;                                    // pie
+  H = Math.max(600, Math.round(H));
+
+  // --- Dibujar ---
+  const cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = "alphabetic";
+
+  let y = P;
+  if (S.perfil.nombre){
+    ctx.fillStyle = TINTA; ctx.font = `700 60px ${F}`; ctx.textAlign = "center";
+    ctx.fillText(S.perfil.nombre.toUpperCase(), W/2, y + 60, AU);
+    y += 96;
+  }
+  if (S.perfil.empresa){
+    ctx.fillStyle = SUAVE; ctx.font = `400 27px ${F}`; ctx.textAlign = "center";
+    ctx.fillText(S.perfil.empresa, W/2, y + 27, AU);
+    y += 40;
+  }
+  ctx.fillStyle = SUAVE; ctx.font = `400 27px ${F}`; ctx.textAlign = "center";
+  const et = etiquetaRango(d.desde, d.hasta);
+  ctx.fillText(et.charAt(0).toUpperCase() + et.slice(1), W/2, y + 27, AU);
+  y += 46;
+  ctx.fillStyle = TINTA; ctx.fillRect(P, y + 12, AU, 3);
+  y += 34;
+
+  const xO = P, xH = P + cObra, xT = P + cObra + cHoras;
+  for (const s of bloques){
+    if (variasSemanas){
+      ctx.fillStyle = SUAVE; ctx.font = `700 22px ${F}`; ctx.textAlign = "left";
+      ctx.fillText(s.etiqueta, P, y + 26);
+      y += 46;
+    }
+
+    for (const dd of s.dias){
+      // Cabecera del día
+      ctx.fillStyle = AZUL; ctx.fillRect(xO, y, AU, H_CAB);
+      ctx.fillStyle = "#FFFFFF"; ctx.font = `700 28px ${F}`; ctx.textAlign = "left";
+      ctx.fillText(diaConFecha(dd.fecha, true), xO + 18, y + 37, cObra - 30);
+      ctx.textAlign = "center";
+      ctx.fillText("Horas", xH + cHoras/2, y + 37);
+      ctx.fillText("Total", xT + cTotal/2, y + 37);
+      // Separadores blancos, como en la hoja
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(xH - 2, y, 3, H_CAB); ctx.fillRect(xT - 2, y, 3, H_CAB);
+      y += H_CAB;
+
+      // Casilla del total: una sola, tan alta como las filas del día
+      ctx.fillStyle = dd.ausencia ? AUSEN : VERDE;
+      ctx.fillRect(xT, y, cTotal, dd.alto);
+      ctx.fillStyle = TINTA;
+      ctx.font = dd.ausencia ? `400 24px ${F}` : `700 30px ${F}`;
+      ctx.textAlign = "center";
+      ctx.fillText(dd.total, xT + cTotal/2, y + dd.alto/2 + 10, cTotal - 16);
+
+      let yf = y;
+      for (const f of dd.filas){
+        ctx.fillStyle = CLARO; ctx.fillRect(xO, yf, cObra + cHoras, f.alto);
+        ctx.fillStyle = TINTA; ctx.font = `400 27px ${F}`; ctx.textAlign = "left";
+        ctx.fillText(f.obra, xO + 18, yf + 34, cObra - 34);
+        ctx.textAlign = "center"; ctx.font = `400 27px ${F}`;
+        ctx.fillText(f.horas, xH + cHoras/2, yf + 34);
+        // Notas debajo del nombre de la obra
+        ctx.fillStyle = NOTA; ctx.font = `italic 23px ${F}`; ctx.textAlign = "left";
+        f.lineas.forEach((l, k) => ctx.fillText(l, xO + 22, yf + 34 + (k+1)*H_NOTA, cObra - 40));
+        // Rejilla blanca entre celdas
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(xO, yf + f.alto - 2, cObra + cHoras, 2);
+        ctx.fillRect(xH - 2, yf, 3, f.alto);
+        yf += f.alto;
+      }
+      y += dd.alto + 20;
+    }
+
+    // Total de la semana
+    ctx.fillStyle = AZUL; ctx.fillRect(xO, y, AU, H_CAB);
+    ctx.fillStyle = "#FFFFFF"; ctx.font = `700 28px ${F}`; ctx.textAlign = "left";
+    ctx.fillText("Total semana", xO + 18, y + 37);
+    ctx.textAlign = "center";
+    ctx.fillText(num(s.total), xT + cTotal/2, y + 37);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(xH - 2, y, 3, H_CAB); ctx.fillRect(xT - 2, y, 3, H_CAB);
+    y += H_CAB + 34;
+  }
+
+  ctx.fillStyle = SUAVE; ctx.font = `400 21px ${F}`; ctx.textAlign = "center";
+  ctx.fillText(`${d.diasTrab} ${d.diasTrab===1?"día":"días"} · Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}`,
+               W/2, y + 24, AU);
+
+  return new Promise(res => cv.toBlob(res, IMG_TIPO, IMG_CALIDAD));
+}
+
+function nombreImagen(){
   const quien = (S.perfil.nombre||"").trim().split(" ")[0].toLowerCase()
     .normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]/g,"");
-  return `horas-${quien ? quien+"-" : ""}${expDesde}_${expHasta}.pdf`;
+  return `horas-${quien ? quien+"-" : ""}${expDesde}_${expHasta}.jpg`;
 }
 
-/** Compartir el PDF por WhatsApp, correo, etc. Si no se puede, se descarga. */
-async function compartirPDF(){
+/** Comparte la imagen por WhatsApp, correo… Si no se puede, la descarga. */
+async function compartirImagen(){
   const d = datosRango(expDesde, expHasta);
   if (!d.dias.length){ toast("No hay jornadas en ese periodo"); return; }
   let blob;
-  try { blob = pdfInforme(d); }
-  catch(e){ apuntarError("pdf", e); toast("No se ha podido generar el PDF"); return; }
+  try { blob = await imagenInforme(d); }
+  catch(e){ apuntarError("imagen", e); toast("No se ha podido generar la imagen"); return; }
+  if (!blob){ toast("No se ha podido generar la imagen"); return; }
 
-  const archivo = new File([blob], nombrePDF(), { type:"application/pdf" });
+  const archivo = new File([blob], nombreImagen(), { type: IMG_TIPO });
   try{
     if (navigator.canShare && navigator.canShare({ files:[archivo] })){
-      await navigator.share({
-        files: [archivo],
-        title: "Informe de horas",
-        text: `Horas de ${etiquetaRango(expDesde, expHasta)}` +
-              (S.perfil.nombre ? ` · ${S.perfil.nombre}` : "")
-      });
+      await navigator.share({ files:[archivo], title:"Horas trabajadas" });
       cerrarSheet();
       return;
     }
   } catch(e){
     if (e && e.name === "AbortError") return;      // el usuario ha cancelado
-    apuntarError("compartir-pdf", e);
+    apuntarError("compartir-imagen", e);
   }
-  descargarPDF(blob);
+  bajarBlob(blob, nombreImagen());
 }
-function descargarPDF(blob){
-  const d = blob || (() => { try { return pdfInforme(datosRango(expDesde, expHasta)); } catch(e){ apuntarError("pdf", e); return null; } })();
-  if (!d) { toast("No se ha podido generar el PDF"); return; }
-  const url = URL.createObjectURL(d);
+async function descargarImagen(){
+  const d = datosRango(expDesde, expHasta);
+  if (!d.dias.length){ toast("No hay jornadas en ese periodo"); return; }
+  try{
+    const blob = await imagenInforme(d);
+    if (blob) bajarBlob(blob, nombreImagen());
+  } catch(e){ apuntarError("imagen", e); toast("No se ha podido generar la imagen"); }
+}
+function bajarBlob(blob, nombre){
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = nombrePDF();
+  a.href = url; a.download = nombre;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
   cerrarSheet();
-  toast("PDF descargado");
+  toast("Imagen guardada");
 }
 
-/* ---------- Informe imprimible / PDF ---------- */
+/* ---------- Informe detallado en pantalla ---------- */
 function verInforme(){
   const d = datosRango(expDesde, expHasta);
   const th = (t, num) => `<th style="text-align:${num?"right":"left"}">${t}</th>`;
@@ -2818,11 +2689,7 @@ function verInforme(){
 
     <table class="resumen"><tbody>
       <tr><td>Días trabajados</td>${td("<b>"+d.diasTrab+"</b>",1)}</tr>
-      ${EXP.descanso ? `
-        <tr><td>Horas trabajadas</td>${td(num(d.horas)+" h",1)}</tr>
-        <tr><td>Descanso descontado <span style="color:#8a8177">${num(S.config.descansoDia)} h × ${d.diasTrab} días</span></td>${td("&minus; "+num(d.descanso)+" h",1)}</tr>
-        <tr class="destaca"><td><b>Horas a computar</b></td>${td("<b>"+num(d.netas)+" h</b>",1)}</tr>`
-      : `<tr><td>Horas totales</td>${td("<b>"+num(d.horas)+" h</b>",1)}</tr>`}
+      <tr><td>Horas totales</td>${td("<b>"+num(d.horas)+" h</b>",1)}</tr>
       <tr><td>De ellas, ordinarias</td>${td(num(d.ordinarias)+" h",1)}</tr>
       <tr><td>Horas extra</td>${td("<b>"+num(d.extraPagada)+" h</b>",1)}</tr>
       ${EXP.importes ? `<tr class="destaca"><td>Importe de las horas extra</td>${td("<b>"+eur(d.importe)+"</b>",1)}</tr>`:""}
@@ -2849,10 +2716,9 @@ function verInforme(){
     for (const [lun, dias] of [...semanas.entries()].sort()){
       html += `<h3>${fmtCorta(lun)} – ${fmtCorta(addDias(lun,6))}</h3><div class="bloques">`;
       dias.sort((a,b) => a.fecha < b.fecha ? -1 : 1).forEach(c => {
-        const dia = DIAS[dow(c.fecha)];
         const partes = c.partes.length ? c.partes : [{ obra:TIPOS[c.tipo].n, horas:c.horasAus||0 }];
         html += `<table class="excelito"><tbody>
-          <tr class="cab"><td>${dia.charAt(0).toUpperCase()+dia.slice(1)}</td><td>Horas</td><td>Total</td></tr>
+          <tr class="cab"><td>${diaConFecha(c.fecha, true)}</td><td>Horas</td><td>Total</td></tr>
           ${partes.map((p,i) => `<tr>
             <td class="obra">${esc(p.obra)}${
               EXP.notas && p.nota ? `<br><span style="font-size:9.5px;color:#5a6b7c;font-style:italic">${esc(p.nota)}</span>` : ""}</td>
@@ -2885,7 +2751,7 @@ function verInforme(){
   }
 
   html += `<div class="pie">Generado con Jornal el ${new Date().toLocaleDateString("es-ES")}${
-    EXP.descanso ? ` · Los totales llevan descontadas ${num(S.config.descansoDia)} h de descanso por día` : ""}${
+    ""}${
     EXP.importes ? "" : " · Sin importes económicos"}</div></div>`;
 
   $("#informe").innerHTML = `
@@ -3419,8 +3285,8 @@ document.addEventListener("click", async ev => {
       case "exportar-mes":    return abrirExportar(`${vMes}-01`, finDeMes(vMes));
       case "exp-csv":            return exportarCSV();
       case "exp-excel":          return exportarExcel();
-      case "exp-compartir-pdf":  return compartirPDF();
-      case "exp-pdf-bajar":      return descargarPDF(null);
+      case "exp-compartir-img":  return compartirImagen();
+      case "exp-img-bajar":      return descargarImagen();
       case "exp-pdf":         return verInforme();
       case "cerrar-informe":  return cerrarInforme();
       case "backup": return descargarBackup(false);
